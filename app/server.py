@@ -2,8 +2,8 @@
 from __future__ import annotations
 import os
 from dotenv import load_dotenv
-load_dotenv()
 
+load_dotenv()
 
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
@@ -50,7 +50,6 @@ import argparse
 from queue import Queue
 from fractions import Fraction
 import threading
-import platform
 import secrets
 from urllib.parse import quote
 from aiohttp import web, WSMsgType
@@ -79,6 +78,7 @@ except Exception as e:
 
 try:
     from rbac import user_can_access_camera, can  # type: ignore
+
     AUTH_READY = True
 except Exception as e:
     print(f"[AUTH] rbac import failed: {e}")
@@ -96,10 +96,16 @@ from ultralytics.trackers.byte_tracker import BYTETracker
 from ultralytics.utils import ROOT as ULTRA_ROOT
 from types import SimpleNamespace
 import yaml
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer, RTCRtpSender
+from aiortc import (
+    RTCPeerConnection,
+    RTCSessionDescription,
+    RTCConfiguration,
+    RTCIceServer,
+    RTCRtpSender,
+)
 from aiortc.mediastreams import VideoStreamTrack
-import av
 from av import VideoFrame
+
 cv2.setNumThreads(0)
 cv2.ocl.setUseOpenCL(False)
 try:
@@ -124,11 +130,13 @@ faceid_inference_lock = threading.Lock()
 _cam_frame_counters: dict = {}
 _cam_frame_counters_lock = threading.Lock()
 
+
 def _get_cam_frame_counter(camera_id) -> int:
     key = camera_id if camera_id is not None else "default"
     with _cam_frame_counters_lock:
         _cam_frame_counters[key] = _cam_frame_counters.get(key, 0) + 1
         return _cam_frame_counters[key]
+
 
 def log_step(name, t0):
     try:
@@ -139,6 +147,7 @@ def log_step(name, t0):
     dt = (time.perf_counter() - t0) * 1000
     print(f"[PERF] {name:<12} {dt:6.2f} ms | thread={threading.get_ident()}")
     return time.perf_counter()
+
 
 ENROLLMENT_ACTIVE = False
 
@@ -173,14 +182,18 @@ RTSP_URLS = {
 # Backward-compat single RTSP URL (optional override)
 RTSP_URL = os.getenv("RTSP_URL", RTSP_URLS.get(1, "")).strip() or None
 
+
 def _with_subtype(url: str, subtype: int) -> str:
     try:
         from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+
         parts = urlsplit(url)
         query = dict(parse_qsl(parts.query, keep_blank_values=True))
         query["subtype"] = str(int(subtype))
         new_query = urlencode(query, doseq=True)
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, new_query, parts.fragment)
+        )
     except Exception:
         # Best-effort fallback: append/replace manually
         if "subtype=" in url:
@@ -204,16 +217,20 @@ def _get_rtsp_url(camera_id: int | None, subtype: int | None = None) -> str | No
         return None
     return _with_subtype(url, subtype) if subtype is not None else url
 
+
 if RTSP_URL or any(RTSP_URLS.values()):
     configured = [str(k) for k, v in RTSP_URLS.items() if v]
-    print(f"📶 RTSP cameras configured: {', '.join(configured) if configured else 'default'}")
+    print(
+        f"📶 RTSP cameras configured: {', '.join(configured) if configured else 'default'}"
+    )
 else:
     print("📶 RTSP not configured")
+
 
 def _parse_int_list_env(name: str, default: str) -> list:
     raw = os.getenv(name, default)
     out = []
-    for part in str(raw).split(','):
+    for part in str(raw).split(","):
         part = part.strip()
         if not part:
             continue
@@ -246,6 +263,7 @@ def _bool_param(val, default: bool = True) -> bool:
         return False
     return default
 
+
 SERVER_CAMERA_FPS = int(os.getenv("SERVER_CAMERA_FPS", "15"))
 GRID_CAMERA_FPS = int(os.getenv("GRID_CAMERA_FPS", "12"))
 SERVER_CAMERA_WIDTH = int(os.getenv("SERVER_CAMERA_WIDTH", "1280"))
@@ -264,17 +282,17 @@ alert_queue = Queue()
 # Runtime stats (thread-safe)
 stats_lock = threading.Lock()
 stats_counters = {
-    'detection_runs': 0,  # how many times process_frame actually ran YOLO
-    'outgoing_frames': 0,
+    "detection_runs": 0,  # how many times process_frame actually ran YOLO
+    "outgoing_frames": 0,
 }
 perf_lock = threading.Lock()
 perf_counters = {
-    'frames': 0,
-    'resize_ms': 0.0,
-    'yolo_ms': 0.0,
-    'faceid_ms': 0.0,
-    'draw_ms': 0.0,
-    'total_ms': 0.0,
+    "frames": 0,
+    "resize_ms": 0.0,
+    "yolo_ms": 0.0,
+    "faceid_ms": 0.0,
+    "draw_ms": 0.0,
+    "total_ms": 0.0,
 }
 
 pid_identity = {}
@@ -283,22 +301,28 @@ PID_NAME_GRACE = float(os.getenv("PID_NAME_GRACE", "0.8"))
 PID_STATE_TTL = float(os.getenv("PID_STATE_TTL", "15.0"))
 pid_display_map = {}
 pid_display_lock = threading.Lock()
-pid_display_counter = 0
 last_active_pids = set()
 last_active_alert_keys = set()
 frame_times = deque(maxlen=60)
 # Per-camera state — keyed by camera_id (int or None).
 # Replacing the 4 old shared globals that caused ghost bboxes across cameras.
-_cam_state: dict = {}   # camera_id -> {"yolo_time", "yolo_frame", "draw_dets", "draw_time"}
+_cam_state: dict = {}  # camera_id -> {"yolo_time", "yolo_frame", "draw_dets", "draw_time"}
 _cam_state_lock = threading.Lock()
+
 
 def _cs(camera_id):
     """Return the mutable per-camera state dict, creating it if needed."""
     key = camera_id if camera_id is not None else -1
     with _cam_state_lock:
         if key not in _cam_state:
-            _cam_state[key] = {"yolo_time": 0.0, "yolo_frame": None, "draw_dets": [], "draw_time": 0.0}
+            _cam_state[key] = {
+                "yolo_time": 0.0,
+                "yolo_frame": None,
+                "draw_dets": [],
+                "draw_time": 0.0,
+            }
         return _cam_state[key]
+
 
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1").strip() == "1"
 
@@ -311,25 +335,20 @@ FACE_EVERY_N_FRAMES = _int_env("FACE_EVERY_N_FRAMES", 10)
 YOLO_PROCESS_EVERY_N_FRAMES = _int_env("YOLO_PROCESS_EVERY_N_FRAMES", 3)
 YOLO_INPUT_RESOLUTION = (
     _int_env("YOLO_INPUT_WIDTH", 640),
-    _int_env("YOLO_INPUT_HEIGHT", 640)
+    _int_env("YOLO_INPUT_HEIGHT", 640),
 )
 FOCUS_YOLO_INPUT_RESOLUTION = (
     _int_env("FOCUS_YOLO_INPUT_WIDTH", 640),
-    _int_env("FOCUS_YOLO_INPUT_HEIGHT", 640)
+    _int_env("FOCUS_YOLO_INPUT_HEIGHT", 640),
 )
 YOLO_MIN_CONF = float(os.getenv("YOLO_MIN_CONF", "0.0"))
 PERSON_CLASS_IDS = set(_parse_int_list_env("PERSON_CLASS_IDS", default=""))
 OUTGOING_TRACK_FPS = _int_env("OUTGOING_TRACK_FPS", 20)
-OUTGOING_TRACK_SIZE = (
-    _int_env("OUTGOING_TRACK_WIDTH", 1280),
-    _int_env("OUTGOING_TRACK_HEIGHT", 720)
-)
 
 # Performance/latency tuning
 PROCESS_FRAME_DEBUG = os.getenv("PROCESS_FRAME_DEBUG", "0").strip() == "1"
 PROCESSING_FPS = _int_env("PROCESSING_FPS", OUTGOING_TRACK_FPS)
 PERF_STATS = os.getenv("PERF_STATS", "1").strip() == "1"
-ROI_UPDATE_GRACE = float(os.getenv("ROI_UPDATE_GRACE", "2.0"))
 
 # --------------------------------------------------
 # GPU / PRECISION TUNING
@@ -357,7 +376,9 @@ WORK_HANDOFF_POOL_SEC = float(os.getenv("WORK_HANDOFF_POOL_SEC", "12.0"))
 WORK_HANDOFF_MAX_DIST_PX = float(os.getenv("WORK_HANDOFF_MAX_DIST_PX", "260"))
 WORK_DEDUPE_IOU = float(os.getenv("WORK_DEDUPE_IOU", "0.72"))
 ALERT_LINE_ZONE_MIN_GAP = float(os.getenv("ALERT_LINE_ZONE_MIN_GAP", "0.30"))
-ALERT_WEBROI_MIN_GAP = float(os.getenv("ALERT_WEBROI_MIN_GAP", str(ALERT_LINE_ZONE_MIN_GAP)))
+ALERT_WEBROI_MIN_GAP = float(
+    os.getenv("ALERT_WEBROI_MIN_GAP", str(ALERT_LINE_ZONE_MIN_GAP))
+)
 ALERT_KNOWN_DETECT_MIN_GAP = float(os.getenv("ALERT_KNOWN_DETECT_MIN_GAP", "20.0"))
 ALERT_UNKNOWN_ONCE_TTL_SEC = float(os.getenv("ALERT_UNKNOWN_ONCE_TTL_SEC", "3600.0"))
 ROI_TOUCH_MARGIN_PX = max(0.0, float(os.getenv("ROI_TOUCH_MARGIN_PX", "6.0")))
@@ -365,7 +386,6 @@ ROI_TOUCH_MIN_OVERLAP_PX = max(0.0, float(os.getenv("ROI_TOUCH_MIN_OVERLAP_PX", 
 CROSS_OVERLAY_TTL_SEC = max(0.5, float(os.getenv("CROSS_OVERLAY_TTL_SEC", "4.0")))
 CROSS_OVERLAY_FLASH_HZ = max(0.0, float(os.getenv("CROSS_OVERLAY_FLASH_HZ", "2.0")))
 FEED_PRESENCE_ALERT_ENABLE = os.getenv("FEED_PRESENCE_ALERT_ENABLE", "1").strip() == "1"
-FEED_PRESENCE_ALERT_MIN_GAP = float(os.getenv("FEED_PRESENCE_ALERT_MIN_GAP", "3.0"))
 FEED_NEW_PERSON_MIN_HITS = _int_env("FEED_NEW_PERSON_MIN_HITS", 2)
 FEED_NEW_PERSON_REALERT_SEC = float(os.getenv("FEED_NEW_PERSON_REALERT_SEC", "60.0"))
 EVENT_CLIP_ENABLE = os.getenv("EVENT_CLIP_ENABLE", "1").strip() == "1"
@@ -376,7 +396,11 @@ EVENT_CLIP_FPS = max(1, _int_env("EVENT_CLIP_FPS", 6))
 EVENT_CLIP_JPEG_QUALITY = max(40, min(95, _int_env("EVENT_CLIP_JPEG_QUALITY", 75)))
 EVENT_CLIP_RETENTION_HOURS = max(1, _int_env("EVENT_CLIP_RETENTION_HOURS", 24))
 EVENT_CLIP_DRAW_OVERLAYS = os.getenv("EVENT_CLIP_DRAW_OVERLAYS", "1").strip() == "1"
-EVENT_CLIP_DIR = Path(os.getenv("EVENT_CLIP_DIR", str(Path(__file__).resolve().parent.parent / "event_clips")))
+EVENT_CLIP_DIR = Path(
+    os.getenv(
+        "EVENT_CLIP_DIR", str(Path(__file__).resolve().parent.parent / "event_clips")
+    )
+)
 ANALYTICS_ALL_CCTV = os.getenv("ANALYTICS_ALL_CCTV", "1").strip() == "1"
 ANALYTICS_CAMERA_IDS = _parse_int_list_env("ANALYTICS_CAMERA_IDS", "1,2,3,4")
 
@@ -422,8 +446,6 @@ def _get_bytetracker(camera_id: int | None, frame_rate: int = 30) -> BYTETracker
     return tracker
 
 
-
-
 def _apply_bytetrack(raw_dets, frame, camera_id, label_fn):
     if not raw_dets:
         return []
@@ -432,14 +454,16 @@ def _apply_bytetrack(raw_dets, frame, camera_id, label_fn):
         x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
         conf = det.get("conf")
         cls_id = det.get("cls_id")
-        data.append([
-            float(x1),
-            float(y1),
-            float(x2),
-            float(y2),
-            float(conf if conf is not None else 0.0),
-            float(cls_id if cls_id is not None else 0),
-        ])
+        data.append(
+            [
+                float(x1),
+                float(y1),
+                float(x2),
+                float(y2),
+                float(conf if conf is not None else 0.0),
+                float(cls_id if cls_id is not None else 0),
+            ]
+        )
     boxes = Boxes(np.asarray(data, dtype=np.float32), frame.shape[:2])
     tracker = _get_bytetracker(camera_id, frame_rate=PROCESSING_FPS)
     tracks = tracker.update(boxes, img=frame)
@@ -449,13 +473,15 @@ def _apply_bytetrack(raw_dets, frame, camera_id, label_fn):
     for t in tracks.tolist():
         x1, y1, x2, y2, track_id, score, cls_id, _idx = t
         cls_int = int(cls_id)
-        tracked.append({
-            "box": [x1, y1, x2, y2],
-            "cls_id": cls_int,
-            "conf": float(score),
-            "label": label_fn(cls_int),
-            "track_id": int(track_id),
-        })
+        tracked.append(
+            {
+                "box": [x1, y1, x2, y2],
+                "cls_id": cls_int,
+                "conf": float(score),
+                "label": label_fn(cls_int),
+                "track_id": int(track_id),
+            }
+        )
     return tracked
 
 
@@ -501,7 +527,9 @@ def _dedupe_overlapping_dets(dets: list[dict], iou_thr: float = 0.7) -> list[dic
     return keep
 
 
-def _motion_similarity(c1: tuple[float, float] | None, c2: tuple[float, float] | None, max_dist: float) -> float:
+def _motion_similarity(
+    c1: tuple[float, float] | None, c2: tuple[float, float] | None, max_dist: float
+) -> float:
     if c1 is None or c2 is None:
         return 0.5
     try:
@@ -518,8 +546,6 @@ def _motion_similarity(c1: tuple[float, float] | None, c2: tuple[float, float] |
 def _hybrid_face_motion_score(face_sim: float, motion_sim: float) -> float:
     w = max(0.0, min(1.0, float(WORK_HYBRID_MOTION_WEIGHT)))
     return ((1.0 - w) * float(face_sim)) + (w * float(motion_sim))
-
-
 
 
 # --------------------------------------------------
@@ -551,6 +577,7 @@ RAW_DIR.mkdir(exist_ok=True, parents=True)
 # Import liveness module
 try:
     from liveness import check_frames_liveness, get_liveness_checker  # type: ignore
+
     LIVENESS_ENABLED = True
     print("[LIVENESS] Liveness detection enabled")
 except Exception as _le:
@@ -562,6 +589,7 @@ except Exception as _le:
 
     def get_liveness_checker():
         return None
+
 
 PID_MAP_DIR = REPO_ROOT / "tracking"
 PID_MAP_DIR.mkdir(exist_ok=True, parents=True)
@@ -585,6 +613,7 @@ def _get_pid_tracker(camera_id: int | None) -> PIDTracker:
             tracker = PIDTracker(map_path=map_path)
             pid_trackers[key] = tracker
     return tracker
+
 
 # Active enrollment sessions: ws_id -> {name, frames, ws, task}
 enroll_sessions = {}
@@ -623,12 +652,17 @@ async def create_enroll_link(request):
     else:
         base = f"{scheme}://{host}"
     enroll_tokens[token] = {"exp": time.time() + 3600, "client_id": client_id}
-    return web.json_response({"url": f"{base}/enroll/{token}", "token": token, "expires_in": 3600})
+    return web.json_response(
+        {"url": f"{base}/enroll/{token}", "token": token, "expires_in": 3600}
+    )
+
 
 async def enroll_page(request):
     token = request.match_info.get("token", "")
     meta = enroll_tokens.get(token)
-    if not meta or time.time() > (meta.get("exp", 0) if isinstance(meta, dict) else meta):
+    if not meta or time.time() > (
+        meta.get("exp", 0) if isinstance(meta, dict) else meta
+    ):
         return web.Response(text="Link expired")
     html = (REPO_ROOT / "static" / "enroll.html").read_text()
     return web.Response(text=html, content_type="text/html")
@@ -698,10 +732,19 @@ async def enroll_token_frames(request):
                 if face_app:
                     detected = face_app.get(img)
                     if detected:
-                        best = max(detected, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
-                        face_data_list.append({"bbox": best.bbox, "pose": getattr(best, "pose", None)})
+                        best = max(
+                            detected,
+                            key=lambda f: (
+                                (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])
+                            ),
+                        )
+                        face_data_list.append(
+                            {"bbox": best.bbox, "pose": getattr(best, "pose", None)}
+                        )
                     else:
-                        face_data_list.append({"bbox": [0, 0, img.shape[1], img.shape[0]]})
+                        face_data_list.append(
+                            {"bbox": [0, 0, img.shape[1], img.shape[0]]}
+                        )
                 else:
                     face_data_list.append({"bbox": [0, 0, img.shape[1], img.shape[0]]})
             except Exception:
@@ -711,11 +754,14 @@ async def enroll_token_frames(request):
             is_live, liveness_score, _ = check_frames_liveness(frames, face_data_list)
             print(f"[ENROLL-TOKEN] Liveness: {is_live} score={liveness_score:.3f}")
             if not is_live:
-                return web.json_response({
-                    "status": "failed",
-                    "message": f"Liveness check failed (score={liveness_score:.2f}). Please use a live camera.",
-                    "liveness_score": round(liveness_score, 3),
-                }, status=400)
+                return web.json_response(
+                    {
+                        "status": "failed",
+                        "message": f"Liveness check failed (score={liveness_score:.2f}). Please use a live camera.",
+                        "liveness_score": round(liveness_score, 3),
+                    },
+                    status=400,
+                )
 
     success, message = enroll_face(name, frames, client_id=client_id)
     if success and faceid:
@@ -726,12 +772,14 @@ async def enroll_token_frames(request):
     if success:
         enroll_tokens.pop(token, None)
 
-    return web.json_response({
-        "status": "ok" if success else "failed",
-        "message": message,
-        "liveness_score": round(liveness_score, 3),
-        "frames_used": len(frames),
-    })
+    return web.json_response(
+        {
+            "status": "ok" if success else "failed",
+            "message": message,
+            "liveness_score": round(liveness_score, 3),
+            "frames_used": len(frames),
+        }
+    )
 
 
 async def login_handler(request):
@@ -744,6 +792,7 @@ async def signup_handler(request):
     if not signup:
         return web.json_response({"error": "auth modules not available"}, status=503)
     return await signup(request)
+
 
 async def enroll_upload(request):
     token = request.match_info.get("token", "")
@@ -783,7 +832,12 @@ async def enroll_upload(request):
             # Detect face to get bbox for liveness check
             faces_detected = face_app.get(img) if face_app else []
             if faces_detected:
-                face_data_list.append({"bbox": faces_detected[0].bbox, "pose": getattr(faces_detected[0], "pose", None)})
+                face_data_list.append(
+                    {
+                        "bbox": faces_detected[0].bbox,
+                        "pose": getattr(faces_detected[0], "pose", None),
+                    }
+                )
             else:
                 face_data_list.append({"bbox": [0, 0, img.shape[1], img.shape[0]]})
 
@@ -806,7 +860,7 @@ async def enroll_upload(request):
         if not is_live:
             return web.Response(
                 text=f"Liveness check failed (score={liveness_score:.2f}). Please use a live camera, not a photo of a photo.",
-                status=400
+                status=400,
             )
 
     success, msg = enroll_face(normalized, frames, client_id=client_id)
@@ -818,18 +872,27 @@ async def enroll_upload(request):
 
     return web.Response(text=f"{msg} ({len(frames)} images)")
 
+
 def _create_face_app() -> FaceAnalysis:
     root = "pre_trained/insightface"
     ort_has_cuda_ep = False
     try:
         import onnxruntime as ort
 
-        ort_has_cuda_ep = "CUDAExecutionProvider" in (ort.get_available_providers() or [])
+        ort_has_cuda_ep = "CUDAExecutionProvider" in (
+            ort.get_available_providers() or []
+        )
     except Exception:
         ort_has_cuda_ep = False
 
-    prefer_cuda = (not FORCE_INSIGHTFACE_CPU) and torch.cuda.is_available() and ort_has_cuda_ep
-    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if prefer_cuda else ["CPUExecutionProvider"]
+    prefer_cuda = (
+        (not FORCE_INSIGHTFACE_CPU) and torch.cuda.is_available() and ort_has_cuda_ep
+    )
+    providers = (
+        ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        if prefer_cuda
+        else ["CPUExecutionProvider"]
+    )
     print(f"🔍 InsightFace providers: {providers}")
     print(f"   CUDA available: {torch.cuda.is_available()}")
     print(f"   ORT has CUDA: {ort_has_cuda_ep}")
@@ -837,13 +900,18 @@ def _create_face_app() -> FaceAnalysis:
     try:
         return FaceAnalysis(name="buffalo_l", root=root, providers=providers)
     except Exception as e:
-        print(f"⚠️ InsightFace init failed with providers={providers}; retrying on CPU: {e}")
-        return FaceAnalysis(name="buffalo_l", root=root, providers=["CPUExecutionProvider"])
+        print(
+            f"⚠️ InsightFace init failed with providers={providers}; retrying on CPU: {e}"
+        )
+        return FaceAnalysis(
+            name="buffalo_l", root=root, providers=["CPUExecutionProvider"]
+        )
 
 
 face_app = _create_face_app()
 # Defer prepare until we know whether CUDA is available so we can select GPU when possible.
 face_app_prepared = False
+
 
 def enroll_face(name: str, frames: list, client_id=None):
     """Enroll a face into the per-client database.
@@ -860,16 +928,19 @@ def enroll_face(name: str, frames: list, client_id=None):
 
     embeddings = []
     import time
+
     ts = int(time.time())
 
     for i, frame in enumerate(frames):
-        send_alert("SYSTEM", f"Processing frame {i+1}/{len(frames)} for {name}")
+        send_alert("SYSTEM", f"Processing frame {i + 1}/{len(frames)} for {name}")
 
         faces = face_app.get(frame)
         if not faces:
             continue
         # Pick the largest face
-        face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
+        face = max(
+            faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])
+        )
         emb = face.embedding
         # L2 normalize
         emb = emb / (np.linalg.norm(emb) + 1e-8)
@@ -906,19 +977,17 @@ def enroll_face(name: str, frames: list, client_id=None):
             all_emb.append(e)
             all_lbl.append(name)
 
-        np.savez(
-            db_path,
-            embeddings=np.array(all_emb),
-            labels=np.array(all_lbl)
-        )
+        np.savez(db_path, embeddings=np.array(all_emb), labels=np.array(all_lbl))
 
     msg = f"Face enrolled for {name} ({len(embeddings)} frames, client={client_id})"
     send_alert("SYSTEM", msg)
     return True, msg
 
+
 # --- PID bbox smoothing ---
 pid_smooth = {}  # pid -> (x1,y1,x2,y2)
 pid_smooth_lock = threading.Lock()
+
 
 def smooth_bbox(pid, box, alpha=0.7):
     with pid_smooth_lock:
@@ -942,19 +1011,22 @@ def force_h264(pc):
     """Prefer H264 codecs for video transceivers (helps Safari/iOS)."""
     try:
         caps = RTCRtpSender.getCapabilities("video")
-        if not caps or not hasattr(caps, 'codecs'):
+        if not caps or not hasattr(caps, "codecs"):
             return
-        h264 = [c for c in caps.codecs if getattr(c, 'mimeType', '').lower() == 'video/h264']
+        h264 = [
+            c for c in caps.codecs if getattr(c, "mimeType", "").lower() == "video/h264"
+        ]
         if not h264:
             return
         for transceiver in pc.getTransceivers():
-            if getattr(transceiver, 'kind', None) == 'video':
+            if getattr(transceiver, "kind", None) == "video":
                 try:
                     transceiver.setCodecPreferences(h264)
                 except Exception as e:
                     logger.debug(f"setCodecPreferences failed: {e}")
     except Exception as e:
         logger.debug(f"force_h264 error: {e}")
+
 
 roi_state = {}  # Remove roi_polygons entirely
 roi_state_lock = threading.Lock()
@@ -968,6 +1040,7 @@ logger = logging.getLogger("webrtc-yolo")
 pcs = set()
 print("🚀 Server starting with iOS compatibility mode")
 
+
 def normalize_name(name: str) -> str:
     name = name.strip()
     if not name:
@@ -979,12 +1052,14 @@ def normalize_name(name: str) -> str:
 # SAFE CUDA INIT (OPTION-A READY)
 # --------------------------------------------------
 
+
 def safe_cuda_available():
     try:
         return torch.cuda.is_available()
     except Exception as e:
         print(f"⚠️ CUDA check failed, using CPU: {e}")
         return False
+
 
 use_cuda = safe_cuda_available()
 device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -998,7 +1073,9 @@ print("CUDA available:", torch.cuda.is_available())
 
 # weights_path = os.environ.get("YOLO_WEIGHTS", "models/yolo/best.pt")
 
-weights_path = os.environ.get("YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt"))
+weights_path = os.environ.get(
+    "YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
+)
 if not os.path.isabs(weights_path):
     weights_path = str(REPO_ROOT / weights_path)
 print(f"🔁 Loading YOLO weights from: {weights_path}")
@@ -1074,12 +1151,15 @@ try:
     available_providers = []
     try:
         import onnxruntime as ort
+
         available_providers = ort.get_available_providers() or []
     except Exception:
         available_providers = []
     ort_has_cuda_ep = "CUDAExecutionProvider" in available_providers
 
-    insightface_ctx_id = 0 if (use_cuda and (not FORCE_INSIGHTFACE_CPU) and ort_has_cuda_ep) else -1
+    insightface_ctx_id = (
+        0 if (use_cuda and (not FORCE_INSIGHTFACE_CPU) and ort_has_cuda_ep) else -1
+    )
     print(f"🔍 Preparing InsightFace with ctx_id={insightface_ctx_id}")
     print("   (0=GPU, -1=CPU)")
     print(f"   InsightFace ctx_id: {insightface_ctx_id}")
@@ -1106,9 +1186,9 @@ print("InsightFace ctx_id:", insightface_ctx_id)
 # --------------------------------------------------
 # FACEID — SAFE INIT (AUTO GPU WHEN ENV FIXED)
 # --------------------------------------------------
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("FaceID SAFE MODE (auto GPU when available)")
-print("="*60)
+print("=" * 60)
 
 FACE_DB_FILE = REPO_ROOT / "models" / "arcface" / "face_db" / "face_db.npz"
 
@@ -1120,15 +1200,17 @@ try:
     # Default 0.25 gives good balance for database with good embeddings
     face_threshold = float(os.getenv("FACE_RECOGNITION_THRESHOLD", "0.25"))
     faceid = FaceIDManager(
-        db_path=FACE_DB_FILE,   # ✅ FILE PATH
+        db_path=FACE_DB_FILE,  # ✅ FILE PATH
         threshold=face_threshold,
-        ctx_id=faceid_ctx
+        ctx_id=faceid_ctx,
     )
-    logger.info("✅ FaceID loaded from %s with threshold %.3f", FACE_DB_FILE, face_threshold)
+    logger.info(
+        "✅ FaceID loaded from %s with threshold %.3f", FACE_DB_FILE, face_threshold
+    )
 except Exception as e:
     logger.error("❌ FaceID disabled: %s", e)
     faceid = None
-   
+
 
 # --------------------------------------------------
 # ROI SETUP
@@ -1139,12 +1221,12 @@ web_roi = None
 
 if web_roi_file.exists():
     try:
-        with open(web_roi_file, 'r') as f:
+        with open(web_roi_file, "r") as f:
             web_roi = json.load(f)
         if isinstance(web_roi, dict) and "enabled" not in web_roi:
             web_roi["enabled"] = False
             try:
-                with open(web_roi_file, 'w') as f:
+                with open(web_roi_file, "w") as f:
                     json.dump(web_roi, f, indent=2)
             except Exception:
                 pass
@@ -1156,7 +1238,7 @@ else:
     # Create default if file doesn't exist
     web_roi = {"x": 0.3, "y": 0.3, "w": 0.4, "h": 0.4, "enabled": False}
     try:
-        with open(web_roi_file, 'w') as f:
+        with open(web_roi_file, "w") as f:
             json.dump(web_roi, f, indent=2)
         logger.info(f"Created default WEB ROI: {web_roi}")
     except Exception as e:
@@ -1184,9 +1266,9 @@ RULES_SCHEMA = {
                 {
                     "id": "roi1",
                     "points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.4]],
-                    "classes": ["person"]
+                    "classes": ["person"],
                 }
-            ]
+            ],
         },
         "virtual_lines": {
             "enabled": False,
@@ -1196,16 +1278,16 @@ RULES_SCHEMA = {
                     "p1": [0.1, 0.5],
                     "p2": [0.9, 0.5],
                     "direction": "both",
-                    "classes": ["person", "car", "truck", "bus", "motorcycle"]
+                    "classes": ["person", "car", "truck", "bus", "motorcycle"],
                 }
-            ]
+            ],
         },
         "unknown_person": {"enabled": False},
         "vehicle_rules": {
             "enabled": False,
             "entry_line_id": "entry",
             "exit_line_id": "exit",
-            "classes": ["car", "truck", "bus", "motorcycle"]
+            "classes": ["car", "truck", "bus", "motorcycle"],
         },
         "parking_rules": {
             "enabled": False,
@@ -1214,12 +1296,13 @@ RULES_SCHEMA = {
                     "id": "park1",
                     "points": [[0.6, 0.6], [0.9, 0.6], [0.9, 0.9], [0.6, 0.9]],
                     "max_seconds": 600,
-                    "classes": ["car", "truck", "bus", "motorcycle"]
+                    "classes": ["car", "truck", "bus", "motorcycle"],
                 }
-            ]
-        }
-    }
+            ],
+        },
+    },
 }
+
 
 def _camera_key(camera_id) -> str:
     if camera_id is None:
@@ -1233,6 +1316,7 @@ def _camera_key(camera_id) -> str:
     except Exception:
         return "device"
 
+
 def _parse_camera_id_value(val):
     if val is None:
         return None
@@ -1245,8 +1329,10 @@ def _parse_camera_id_value(val):
     except Exception:
         return None
 
+
 def _default_camera_rules() -> dict:
     return deepcopy(RULES_SCHEMA["camera_rule"])
+
 
 def _load_rules_file() -> dict:
     if RULES_FILE.exists():
@@ -1263,6 +1349,7 @@ def _load_rules_file() -> dict:
             pass
     return {"version": 1, "cameras": {}}
 
+
 def _save_rules_file(data: dict) -> None:
     try:
         RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -1270,11 +1357,13 @@ def _save_rules_file(data: dict) -> None:
     except Exception as e:
         logger.warning(f"Failed to save camera rules: {e}")
 
+
 def _clamp01(val: float) -> float:
     try:
         return max(0.0, min(1.0, float(val)))
     except Exception:
         return 0.0
+
 
 def _normalize_points(points) -> list:
     out = []
@@ -1283,6 +1372,7 @@ def _normalize_points(points) -> list:
             continue
         out.append([_clamp01(pt[0]), _clamp01(pt[1])])
     return out
+
 
 def _normalize_camera_rules(rules: dict | None) -> dict:
     base = _default_camera_rules()
@@ -1295,73 +1385,113 @@ def _normalize_camera_rules(rules: dict | None) -> dict:
     for win in rules.get("active_hours", base.get("active_hours", [])) or []:
         if not isinstance(win, dict):
             continue
-        days = [int(d) for d in (win.get("days") or []) if str(d).isdigit() and 0 <= int(d) <= 6]
+        days = [
+            int(d)
+            for d in (win.get("days") or [])
+            if str(d).isdigit() and 0 <= int(d) <= 6
+        ]
         start = str(win.get("start", "00:00"))
         end = str(win.get("end", "23:59"))
         hours.append({"days": days, "start": start, "end": end})
     base["active_hours"] = hours
 
     max_people = rules.get("max_people", {})
-    base["max_people"]["enabled"] = bool(max_people.get("enabled", base["max_people"]["enabled"]))
+    base["max_people"]["enabled"] = bool(
+        max_people.get("enabled", base["max_people"]["enabled"])
+    )
     try:
-        base["max_people"]["value"] = max(0, int(max_people.get("value", base["max_people"]["value"])))
+        base["max_people"]["value"] = max(
+            0, int(max_people.get("value", base["max_people"]["value"]))
+        )
     except Exception:
         base["max_people"]["value"] = base["max_people"]["value"]
 
     roi = rules.get("roi_intrusion", {})
-    base["roi_intrusion"]["enabled"] = bool(roi.get("enabled", base["roi_intrusion"]["enabled"]))
+    base["roi_intrusion"]["enabled"] = bool(
+        roi.get("enabled", base["roi_intrusion"]["enabled"])
+    )
     zones = []
     for zone in roi.get("zones", []) or []:
         if not isinstance(zone, dict):
             continue
-        zone_id = str(zone.get("id") or f"roi{len(zones)+1}")
+        zone_id = str(zone.get("id") or f"roi{len(zones) + 1}")
         points = _normalize_points(zone.get("points", []))
         classes = zone.get("classes") or ["person"]
         zones.append({"id": zone_id, "points": points, "classes": classes})
     base["roi_intrusion"]["zones"] = zones
 
     vlines = rules.get("virtual_lines", {})
-    base["virtual_lines"]["enabled"] = bool(vlines.get("enabled", base["virtual_lines"]["enabled"]))
+    base["virtual_lines"]["enabled"] = bool(
+        vlines.get("enabled", base["virtual_lines"]["enabled"])
+    )
     lines = []
     for line in vlines.get("lines", []) or []:
         if not isinstance(line, dict):
             continue
-        line_id = str(line.get("id") or f"line{len(lines)+1}")
+        line_id = str(line.get("id") or f"line{len(lines) + 1}")
         p1 = _normalize_points([line.get("p1", [0.1, 0.5])])
         p2 = _normalize_points([line.get("p2", [0.9, 0.5])])
         p1 = p1[0] if p1 else [0.1, 0.5]
         p2 = p2[0] if p2 else [0.9, 0.5]
         direction = str(line.get("direction", "both"))
         classes = line.get("classes") or ["person"]
-        lines.append({"id": line_id, "p1": p1, "p2": p2, "direction": direction, "classes": classes})
+        lines.append(
+            {
+                "id": line_id,
+                "p1": p1,
+                "p2": p2,
+                "direction": direction,
+                "classes": classes,
+            }
+        )
     base["virtual_lines"]["lines"] = lines
 
     unk = rules.get("unknown_person", {})
-    base["unknown_person"]["enabled"] = bool(unk.get("enabled", base["unknown_person"]["enabled"]))
+    base["unknown_person"]["enabled"] = bool(
+        unk.get("enabled", base["unknown_person"]["enabled"])
+    )
 
     vehicle = rules.get("vehicle_rules", {})
-    base["vehicle_rules"]["enabled"] = bool(vehicle.get("enabled", base["vehicle_rules"]["enabled"]))
-    base["vehicle_rules"]["entry_line_id"] = str(vehicle.get("entry_line_id", base["vehicle_rules"]["entry_line_id"]))
-    base["vehicle_rules"]["exit_line_id"] = str(vehicle.get("exit_line_id", base["vehicle_rules"]["exit_line_id"]))
-    base["vehicle_rules"]["classes"] = vehicle.get("classes") or base["vehicle_rules"]["classes"]
+    base["vehicle_rules"]["enabled"] = bool(
+        vehicle.get("enabled", base["vehicle_rules"]["enabled"])
+    )
+    base["vehicle_rules"]["entry_line_id"] = str(
+        vehicle.get("entry_line_id", base["vehicle_rules"]["entry_line_id"])
+    )
+    base["vehicle_rules"]["exit_line_id"] = str(
+        vehicle.get("exit_line_id", base["vehicle_rules"]["exit_line_id"])
+    )
+    base["vehicle_rules"]["classes"] = (
+        vehicle.get("classes") or base["vehicle_rules"]["classes"]
+    )
 
     parking = rules.get("parking_rules", {})
-    base["parking_rules"]["enabled"] = bool(parking.get("enabled", base["parking_rules"]["enabled"]))
+    base["parking_rules"]["enabled"] = bool(
+        parking.get("enabled", base["parking_rules"]["enabled"])
+    )
     pzones = []
     for zone in parking.get("zones", []) or []:
         if not isinstance(zone, dict):
             continue
-        zone_id = str(zone.get("id") or f"park{len(pzones)+1}")
+        zone_id = str(zone.get("id") or f"park{len(pzones) + 1}")
         points = _normalize_points(zone.get("points", []))
         classes = zone.get("classes") or base["parking_rules"]["zones"][0]["classes"]
         try:
             max_seconds = max(1, int(zone.get("max_seconds", 600)))
         except Exception:
             max_seconds = 600
-        pzones.append({"id": zone_id, "points": points, "classes": classes, "max_seconds": max_seconds})
+        pzones.append(
+            {
+                "id": zone_id,
+                "points": points,
+                "classes": classes,
+                "max_seconds": max_seconds,
+            }
+        )
     base["parking_rules"]["zones"] = pzones
 
     return base
+
 
 def _get_camera_rules(camera_id) -> dict:
     cam_key = _camera_key(camera_id)
@@ -1369,6 +1499,7 @@ def _get_camera_rules(camera_id) -> dict:
         data = _load_rules_file()
         cam_rules = data.get("cameras", {}).get(cam_key)
     return _normalize_camera_rules(cam_rules)
+
 
 def _set_camera_rules(camera_id, rules: dict) -> dict:
     cam_key = _camera_key(camera_id)
@@ -1379,6 +1510,7 @@ def _set_camera_rules(camera_id, rules: dict) -> dict:
         data["cameras"][cam_key] = normalized
         _save_rules_file(data)
     return normalized
+
 
 def _get_camera_state(camera_id):
     cam_key = _camera_key(camera_id)
@@ -1395,6 +1527,7 @@ def _get_camera_state(camera_id):
             camera_states[cam_key] = state
         return state
 
+
 def _parse_hhmm(val: str) -> int | None:
     try:
         parts = val.split(":")
@@ -1407,6 +1540,7 @@ def _parse_hhmm(val: str) -> int | None:
         return h * 60 + m
     except Exception:
         return None
+
 
 def _is_active_now(active_hours) -> bool:
     if not active_hours:
@@ -1431,6 +1565,7 @@ def _is_active_now(active_hours) -> bool:
                 return True
     return False
 
+
 def _point_in_poly(px: float, py: float, poly) -> bool:
     if not poly or len(poly) < 3:
         return False
@@ -1438,21 +1573,33 @@ def _point_in_poly(px: float, py: float, poly) -> bool:
     j = len(poly) - 1
     for i, (xi, yi) in enumerate(poly):
         xj, yj = poly[j]
-        intersect = ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi)
+        intersect = ((yi > py) != (yj > py)) and (
+            px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi
+        )
         if intersect:
             inside = not inside
         j = i
     return inside
 
+
 def _line_side(p1, p2, p) -> float:
     return (p2[0] - p1[0]) * (p[1] - p1[1]) - (p2[1] - p1[1]) * (p[0] - p1[0])
+
 
 def _classify_label(label: str, cls_id: int | None) -> dict:
     lbl = (label or "").lower()
     is_person = "person" in lbl
     if PERSON_CLASS_IDS and cls_id is not None and cls_id in PERSON_CLASS_IDS:
         is_person = True
-    vehicle_labels = {"car", "truck", "bus", "motorcycle", "motorbike", "bicycle", "van"}
+    vehicle_labels = {
+        "car",
+        "truck",
+        "bus",
+        "motorcycle",
+        "motorbike",
+        "bicycle",
+        "van",
+    }
     is_vehicle = lbl in vehicle_labels
     animal_labels = {"dog", "cat", "horse", "cow", "sheep", "bird"}
     is_animal = lbl in animal_labels
@@ -1464,6 +1611,7 @@ def _classify_label(label: str, cls_id: int | None) -> dict:
         "is_animal": is_animal,
         "is_plate": is_plate,
     }
+
 
 def _class_matches(det, classes) -> bool:
     if not classes:
@@ -1485,6 +1633,7 @@ def _class_matches(det, classes) -> bool:
             return True
     return False
 
+
 def _state_throttle(state: dict, key: str, min_gap: float) -> bool:
     now = time.time()
     last = state.get("alert_last", {}).get(key, 0)
@@ -1492,6 +1641,7 @@ def _state_throttle(state: dict, key: str, min_gap: float) -> bool:
         state.setdefault("alert_last", {})[key] = now
         return True
     return False
+
 
 def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) -> None:
     rules = _get_camera_rules(camera_id)
@@ -1513,7 +1663,9 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
                 limit = 0
             count = sum(1 for d in det_items if d.get("is_person"))
             if count > limit and _state_throttle(state, "max_people", 4.0):
-                send_alert("SYSTEM", f"P2 | CAM{cam_key} | MAX_PEOPLE | {count}>{limit}")
+                send_alert(
+                    "SYSTEM", f"P2 | CAM{cam_key} | MAX_PEOPLE | {count}>{limit}"
+                )
 
         # Unknown person alert
         if rules.get("unknown_person", {}).get("enabled"):
@@ -1521,7 +1673,10 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
                 if det.get("is_person") and det.get("name") == "Unknown":
                     token = _unknown_once_key(det, cam_key)
                     if _should_emit_unknown_once(token, ts):
-                        send_alert(_alert_subject(det), f"P2 | CAM{cam_key} | UNKNOWN_PERSON_FIRST_SEEN")
+                        send_alert(
+                            _alert_subject(det),
+                            f"P2 | CAM{cam_key} | UNKNOWN_PERSON_FIRST_SEEN",
+                        )
 
         # ROI intrusion
         roi = rules.get("roi_intrusion", {})
@@ -1536,29 +1691,64 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
                     if not _class_matches(det, zone.get("classes")):
                         continue
                     cx, cy = det.get("center", (0, 0))
-                    inside = _point_in_poly(cx / frame_shape[1], cy / frame_shape[0], points)
+                    inside = _point_in_poly(
+                        cx / frame_shape[1], cy / frame_shape[0], points
+                    )
                     entity = det.get("work_key") or f"pid:{det.get('pid')}"
                     was_inside = pid_map.get(entity, False)
                     if inside and not was_inside:
-                        if _state_throttle(state, f"zone:{zone_id}:{entity}:enter", ALERT_LINE_ZONE_MIN_GAP):
+                        if _state_throttle(
+                            state,
+                            f"zone:{zone_id}:{entity}:enter",
+                            ALERT_LINE_ZONE_MIN_GAP,
+                        ):
                             ev = f"P1 | CAM{cam_key} | ZONE {zone_id} | ENTER"
                             send_alert(_alert_subject(det), ev)
-                            _queue_event_clip(camera_id, ev, _alert_subject(det), ts, {"zone_id": zone_id, "transition": "enter"})
-                        _set_cross_overlay(camera_id, entity, f"ZONE {zone_id} ENTER", ts)
+                            _queue_event_clip(
+                                camera_id,
+                                ev,
+                                _alert_subject(det),
+                                ts,
+                                {"zone_id": zone_id, "transition": "enter"},
+                            )
+                        _set_cross_overlay(
+                            camera_id, entity, f"ZONE {zone_id} ENTER", ts
+                        )
                     elif (not inside) and was_inside:
-                        if _state_throttle(state, f"zone:{zone_id}:{entity}:exit", ALERT_LINE_ZONE_MIN_GAP):
+                        if _state_throttle(
+                            state,
+                            f"zone:{zone_id}:{entity}:exit",
+                            ALERT_LINE_ZONE_MIN_GAP,
+                        ):
                             ev = f"P1 | CAM{cam_key} | ZONE {zone_id} | EXIT"
                             send_alert(_alert_subject(det), ev)
-                            _queue_event_clip(camera_id, ev, _alert_subject(det), ts, {"zone_id": zone_id, "transition": "exit"})
-                        _set_cross_overlay(camera_id, entity, f"ZONE {zone_id} EXIT", ts)
+                            _queue_event_clip(
+                                camera_id,
+                                ev,
+                                _alert_subject(det),
+                                ts,
+                                {"zone_id": zone_id, "transition": "exit"},
+                            )
+                        _set_cross_overlay(
+                            camera_id, entity, f"ZONE {zone_id} EXIT", ts
+                        )
                     pid_map[entity] = inside
 
         # Virtual lines + vehicle entry/exit
         vlines = rules.get("virtual_lines", {})
         vehicle_rules = rules.get("vehicle_rules", {})
-        entry_line_id = vehicle_rules.get("entry_line_id") if vehicle_rules.get("enabled") else None
-        exit_line_id = vehicle_rules.get("exit_line_id") if vehicle_rules.get("enabled") else None
-        vehicle_classes = vehicle_rules.get("classes") or ["car", "truck", "bus", "motorcycle"]
+        entry_line_id = (
+            vehicle_rules.get("entry_line_id") if vehicle_rules.get("enabled") else None
+        )
+        exit_line_id = (
+            vehicle_rules.get("exit_line_id") if vehicle_rules.get("enabled") else None
+        )
+        vehicle_classes = vehicle_rules.get("classes") or [
+            "car",
+            "truck",
+            "bus",
+            "motorcycle",
+        ]
 
         if vlines.get("enabled"):
             for line in vlines.get("lines", []) or []:
@@ -1571,32 +1761,87 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
                     if not _class_matches(det, line.get("classes")):
                         continue
                     cx, cy = det.get("center", (0, 0))
-                    side = _line_side(p1, p2, (cx / frame_shape[1], cy / frame_shape[0]))
+                    side = _line_side(
+                        p1, p2, (cx / frame_shape[1], cy / frame_shape[0])
+                    )
                     entity = det.get("work_key") or f"pid:{det.get('pid')}"
                     prev_side = pid_sides.get(entity)
-                    if prev_side is not None and side != 0 and prev_side != 0 and (side > 0) != (prev_side > 0):
-                        direction_tag = "A->B" if (prev_side > 0 and side < 0) else "B->A"
+                    if (
+                        prev_side is not None
+                        and side != 0
+                        and prev_side != 0
+                        and (side > 0) != (prev_side > 0)
+                    ):
+                        direction_tag = (
+                            "A->B" if (prev_side > 0 and side < 0) else "B->A"
+                        )
                         cross_ok = (
                             direction == "both"
-                            or (direction in ("a->b", "a2b") and prev_side > 0 and side < 0)
-                            or (direction in ("b->a", "b2a") and prev_side < 0 and side > 0)
+                            or (
+                                direction in ("a->b", "a2b")
+                                and prev_side > 0
+                                and side < 0
+                            )
+                            or (
+                                direction in ("b->a", "b2a")
+                                and prev_side < 0
+                                and side > 0
+                            )
                         )
                         if cross_ok:
-                            if _state_throttle(state, f"line:{line_id}:{entity}:{direction_tag}", ALERT_LINE_ZONE_MIN_GAP):
+                            if _state_throttle(
+                                state,
+                                f"line:{line_id}:{entity}:{direction_tag}",
+                                ALERT_LINE_ZONE_MIN_GAP,
+                            ):
                                 ev = f"P1 | CAM{cam_key} | LINE {line_id} | CROSS {direction_tag}"
                                 send_alert(_alert_subject(det), ev)
-                                _queue_event_clip(camera_id, ev, _alert_subject(det), ts, {"line_id": line_id, "direction": direction_tag})
+                                _queue_event_clip(
+                                    camera_id,
+                                    ev,
+                                    _alert_subject(det),
+                                    ts,
+                                    {"line_id": line_id, "direction": direction_tag},
+                                )
 
-                        if entry_line_id and line_id == entry_line_id and _class_matches(det, vehicle_classes):
-                            if _state_throttle(state, f"veh_entry:{line_id}:{entity}", ALERT_LINE_ZONE_MIN_GAP):
+                        if (
+                            entry_line_id
+                            and line_id == entry_line_id
+                            and _class_matches(det, vehicle_classes)
+                        ):
+                            if _state_throttle(
+                                state,
+                                f"veh_entry:{line_id}:{entity}",
+                                ALERT_LINE_ZONE_MIN_GAP,
+                            ):
                                 ev = f"P1 | CAM{cam_key} | VEHICLE | ENTRY | LINE {line_id}"
                                 send_alert(_alert_subject(det), ev)
-                                _queue_event_clip(camera_id, ev, _alert_subject(det), ts, {"line_id": line_id, "vehicle": "entry"})
-                        if exit_line_id and line_id == exit_line_id and _class_matches(det, vehicle_classes):
-                            if _state_throttle(state, f"veh_exit:{line_id}:{entity}", ALERT_LINE_ZONE_MIN_GAP):
+                                _queue_event_clip(
+                                    camera_id,
+                                    ev,
+                                    _alert_subject(det),
+                                    ts,
+                                    {"line_id": line_id, "vehicle": "entry"},
+                                )
+                        if (
+                            exit_line_id
+                            and line_id == exit_line_id
+                            and _class_matches(det, vehicle_classes)
+                        ):
+                            if _state_throttle(
+                                state,
+                                f"veh_exit:{line_id}:{entity}",
+                                ALERT_LINE_ZONE_MIN_GAP,
+                            ):
                                 ev = f"P1 | CAM{cam_key} | VEHICLE | EXIT | LINE {line_id}"
                                 send_alert(_alert_subject(det), ev)
-                                _queue_event_clip(camera_id, ev, _alert_subject(det), ts, {"line_id": line_id, "vehicle": "exit"})
+                                _queue_event_clip(
+                                    camera_id,
+                                    ev,
+                                    _alert_subject(det),
+                                    ts,
+                                    {"line_id": line_id, "vehicle": "exit"},
+                                )
 
                     pid_sides[entity] = side
 
@@ -1615,7 +1860,9 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
                     if not _class_matches(det, zone.get("classes")):
                         continue
                     cx, cy = det.get("center", (0, 0))
-                    inside = _point_in_poly(cx / frame_shape[1], cy / frame_shape[0], points)
+                    inside = _point_in_poly(
+                        cx / frame_shape[1], cy / frame_shape[0], points
+                    )
                     pid = det.get("pid")
                     if not inside:
                         continue
@@ -1628,11 +1875,18 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
                         if elapsed >= max_seconds and not rec.get("alerted"):
                             ev = f"P2 | CAM{cam_key} | PARKING_LIMIT {zone_id}"
                             throttled_alert(_alert_subject(det), ev, pid, min_gap=10.0)
-                            _queue_event_clip(camera_id, ev, _alert_subject(det), ts, {"zone_id": zone_id, "parking_limit": max_seconds})
+                            _queue_event_clip(
+                                camera_id,
+                                ev,
+                                _alert_subject(det),
+                                ts,
+                                {"zone_id": zone_id, "parking_limit": max_seconds},
+                            )
                             rec["alerted"] = True
                 for pid in list(pid_map.keys()):
                     if pid not in seen_pids:
                         pid_map.pop(pid, None)
+
 
 # --------------------------------------------------
 # ALERT SYSTEM (USE OLD VERSION)
@@ -1656,12 +1910,13 @@ event_clip_last_fs_cleanup = 0.0
 cross_overlay_lock = threading.Lock()
 cross_overlay_state = {}
 
+
 def broadcast_payload(payload):
     success_count = 0
     dead_channels = []
     for ch in list(alert_channels):
         try:
-            if hasattr(ch, 'readyState') and ch.readyState == 'open':
+            if hasattr(ch, "readyState") and ch.readyState == "open":
                 ch.send(payload)
                 success_count += 1
             else:
@@ -1672,32 +1927,33 @@ def broadcast_payload(payload):
         alert_channels.discard(ch)
     return success_count
 
+
 def send_enrollment_alert(message):
     if not message:
         return
-    payload = json.dumps({
-        "person": "SYSTEM",
-        "event": message,
-        "timestamp": time.strftime("%H:%M:%S")
-    })
+    payload = json.dumps(
+        {"person": "SYSTEM", "event": message, "timestamp": time.strftime("%H:%M:%S")}
+    )
     broadcast_payload(payload)
+
 
 def send_session_guidance(session, message):
     if not session or not message:
         return
-    last_message = session.get('last_guidance')
+    last_message = session.get("last_guidance")
     now = time.time()
-    if last_message == message and now - session.get('last_guidance_time', 0) < 1.0:
+    if last_message == message and now - session.get("last_guidance_time", 0) < 1.0:
         return
-    session['last_guidance'] = message
-    session['last_guidance_time'] = now
+    session["last_guidance"] = message
+    session["last_guidance_time"] = now
     send_enrollment_alert(message)
+
 
 def has_active_alert_channel():
     return any(
-        hasattr(ch, 'readyState') and ch.readyState == 'open'
-        for ch in alert_channels
+        hasattr(ch, "readyState") and ch.readyState == "open" for ch in alert_channels
     )
+
 
 def send_alert(person, event, clip_url: str | None = None, meta: dict | None = None):
     """Thread-safe alert sending"""
@@ -1727,6 +1983,7 @@ def send_alert(person, event, clip_url: str | None = None, meta: dict | None = N
         payload["meta"] = meta
     alert_queue.put(payload)
 
+
 def throttled_alert(name, event, pid, min_gap=2.0, stable_key: str | None = None):
     """Per-person+event cooldown (OLD VERSION)"""
     key = f"{stable_key if stable_key is not None else pid}:{event}"
@@ -1742,10 +1999,7 @@ def throttled_alert(name, event, pid, min_gap=2.0, stable_key: str | None = None
 
 def _alert_subject(det: dict) -> str:
     return str(
-        det.get("display_name")
-        or det.get("name")
-        or det.get("label")
-        or "Object"
+        det.get("display_name") or det.get("name") or det.get("label") or "Object"
     )
 
 
@@ -1811,7 +2065,13 @@ def _cleanup_event_clip_files(now_ts: float | None = None) -> None:
         pass
 
 
-def _queue_event_clip(camera_id, event_text: str, subject: str, event_ts: float | None = None, extra: dict | None = None) -> None:
+def _queue_event_clip(
+    camera_id,
+    event_text: str,
+    subject: str,
+    event_ts: float | None = None,
+    extra: dict | None = None,
+) -> None:
     if not EVENT_CLIP_ENABLE:
         return
     ts = float(event_ts or time.time())
@@ -1848,16 +2108,26 @@ def _save_event_clip(job: dict, frames: list[tuple[float, bytes]]) -> None:
 
     cam = job.get("camera_id", -1)
     event_name = str(job.get("event", "EVENT")).replace(" ", "_").replace("|", "_")[:80]
-    stamp = datetime.fromtimestamp(float(job.get("event_ts", time.time()))).strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.fromtimestamp(float(job.get("event_ts", time.time()))).strftime(
+        "%Y%m%d_%H%M%S"
+    )
     token = secrets.token_hex(4)
-    day_dir = EVENT_CLIP_DIR / datetime.fromtimestamp(float(job.get("event_ts", time.time()))).strftime("%Y-%m-%d") / f"cam{cam}"
+    day_dir = (
+        EVENT_CLIP_DIR
+        / datetime.fromtimestamp(float(job.get("event_ts", time.time()))).strftime(
+            "%Y-%m-%d"
+        )
+        / f"cam{cam}"
+    )
     day_dir.mkdir(parents=True, exist_ok=True)
     video_path = day_dir / f"{stamp}_{event_name}_{token}.mp4"
     meta_path = day_dir / f"{stamp}_{event_name}_{token}.json"
 
     h, w = imgs[0].shape[:2]
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(video_path), fourcc, float(EVENT_CLIP_FPS), (int(w), int(h)))
+    writer = cv2.VideoWriter(
+        str(video_path), fourcc, float(EVENT_CLIP_FPS), (int(w), int(h))
+    )
     try:
         for fr in imgs:
             if fr.shape[:2] != (h, w):
@@ -1915,7 +2185,15 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
             wx2 = int((float(web_roi.get("x", 0.0)) + float(web_roi.get("w", 0.0))) * w)
             wy2 = int((float(web_roi.get("y", 0.0)) + float(web_roi.get("h", 0.0))) * h)
             cv2.rectangle(frame, (wx1, wy1), (wx2, wy2), (0, 165, 255), 2)
-            cv2.putText(frame, "WEB ROI", (wx1 + 4, max(16, wy1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
+            cv2.putText(
+                frame,
+                "WEB ROI",
+                (wx1 + 4, max(16, wy1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 165, 255),
+                2,
+            )
     except Exception:
         pass
 
@@ -1938,10 +2216,20 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                     pts.append([px, py])
                 if len(pts) >= 2:
                     arr = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
-                    cv2.polylines(frame, [arr], isClosed=True, color=(255, 220, 0), thickness=2)
+                    cv2.polylines(
+                        frame, [arr], isClosed=True, color=(255, 220, 0), thickness=2
+                    )
                     zx, zy = pts[0]
                     zid = str(zone.get("id") or "roi")
-                    cv2.putText(frame, f"ZONE {zid}", (zx + 4, max(16, zy - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 220, 0), 2)
+                    cv2.putText(
+                        frame,
+                        f"ZONE {zid}",
+                        (zx + 4, max(16, zy - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 220, 0),
+                        2,
+                    )
     except Exception:
         pass
 
@@ -1957,7 +2245,15 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                 y2 = int(_clamp01(p2[1]) * h)
                 cv2.line(frame, (x1, y1), (x2, y2), (255, 80, 80), 2)
                 lid = str(line.get("id") or "line")
-                cv2.putText(frame, f"LINE {lid}", (x1 + 4, max(16, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 80, 80), 2)
+                cv2.putText(
+                    frame,
+                    f"LINE {lid}",
+                    (x1 + 4, max(16, y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 80, 80),
+                    2,
+                )
     except Exception:
         pass
 
@@ -1974,10 +2270,20 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                     pts.append([px, py])
                 if len(pts) >= 2:
                     arr = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
-                    cv2.polylines(frame, [arr], isClosed=True, color=(180, 0, 255), thickness=2)
+                    cv2.polylines(
+                        frame, [arr], isClosed=True, color=(180, 0, 255), thickness=2
+                    )
                     zx, zy = pts[0]
                     zid = str(zone.get("id") or "park")
-                    cv2.putText(frame, f"PARK {zid}", (zx + 4, max(16, zy - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 0, 255), 2)
+                    cv2.putText(
+                        frame,
+                        f"PARK {zid}",
+                        (zx + 4, max(16, zy - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (180, 0, 255),
+                        2,
+                    )
     except Exception:
         pass
 
@@ -2050,7 +2356,9 @@ def _event_clip_on_frame(camera_id, frame, ts: float) -> None:
     _cleanup_event_clip_files(ts)
 
 
-def _set_cross_overlay(camera_id, entity_key: str, label: str, ts: float | None = None) -> None:
+def _set_cross_overlay(
+    camera_id, entity_key: str, label: str, ts: float | None = None
+) -> None:
     cam = _camera_key(camera_id)
     key = (str(cam), str(entity_key))
     with cross_overlay_lock:
@@ -2088,13 +2396,17 @@ def _emit_presence_alert(camera_id, det_items: list, ts: float) -> None:
         raw_name = str(d.get("name") or "")
         wk = d.get("work_key")
         # Use known identity as stable key; for unknown-like labels use work_key/position.
-        if raw_name and raw_name != "Unknown" and not raw_name.lower().startswith("person-"):
+        if (
+            raw_name
+            and raw_name != "Unknown"
+            and not raw_name.lower().startswith("person-")
+        ):
             k = f"name:{raw_name.lower()}"
         elif wk:
             k = f"wk:{wk}"
         else:
             cx, cy = d.get("center", (0, 0))
-            k = f"u:{int(cx//60)}:{int(cy//60)}"
+            k = f"u:{int(cx // 60)}:{int(cy // 60)}"
         current[k] = nm
 
     if not current:
@@ -2108,7 +2420,9 @@ def _emit_presence_alert(camera_id, det_items: list, ts: float) -> None:
 
     newcomers = []
     with presence_alert_lock:
-        st = presence_alert_state.get(cam_key, {"active": set(), "pending": {}, "last_emit": {}})
+        st = presence_alert_state.get(
+            cam_key, {"active": set(), "pending": {}, "last_emit": {}}
+        )
         active = set(st.get("active", set()))
         pending = dict(st.get("pending", {}))
         last_emit = dict(st.get("last_emit", {}))
@@ -2130,7 +2444,9 @@ def _emit_presence_alert(camera_id, det_items: list, ts: float) -> None:
             pending[k] = rec
 
             enough_hits = rec["count"] >= max(1, FEED_NEW_PERSON_MIN_HITS)
-            can_realert = (ts - float(last_emit.get(k, 0.0))) >= max(0.2, FEED_NEW_PERSON_REALERT_SEC)
+            can_realert = (ts - float(last_emit.get(k, 0.0))) >= max(
+                0.2, FEED_NEW_PERSON_REALERT_SEC
+            )
             if enough_hits and can_realert:
                 newcomers.append(nm)
                 active.add(k)
@@ -2151,16 +2467,6 @@ def _emit_presence_alert(camera_id, det_items: list, ts: float) -> None:
             seen_names.add(n)
             uniq.append(n)
         send_alert("SYSTEM", f"P0 | CAM{cam_key} | NEW_PERSON_SEEN | {', '.join(uniq)}")
-
-
-def _should_send_pid_alert(pid):
-    with pid_identity_lock:
-        info = pid_identity.get(pid)
-        if not info:
-            return False
-        if info.get("name") != "Unknown":
-            return True
-        return time.time() - info.get("ts", 0) >= PID_NAME_GRACE
 
 
 def _cache_pid_name(pid: int, candidate_name: str, timestamp: float) -> str:
@@ -2208,10 +2514,14 @@ def _update_work_timer(pid: str | int, timestamp: float, active: bool) -> float:
             if started_at is None:
                 rec["started_at"] = timestamp
                 started_at = timestamp
-            return float(rec.get("accumulated", 0.0)) + max(0.0, timestamp - float(started_at))
+            return float(rec.get("accumulated", 0.0)) + max(
+                0.0, timestamp - float(started_at)
+            )
 
         if started_at is not None:
-            rec["accumulated"] = float(rec.get("accumulated", 0.0)) + max(0.0, timestamp - float(started_at))
+            rec["accumulated"] = float(rec.get("accumulated", 0.0)) + max(
+                0.0, timestamp - float(started_at)
+            )
             rec["started_at"] = None
         return float(rec.get("accumulated", 0.0))
 
@@ -2241,7 +2551,14 @@ def _get_or_create_work_display_id(work_key: str) -> int:
         return int(val)
 
 
-def _resolve_work_key(pid: int, bbox: tuple[float, float, float, float], ts: float, name: str, camera_id: int | None, used_keys: set[str] | None = None) -> str:
+def _resolve_work_key(
+    pid: int,
+    bbox: tuple[float, float, float, float],
+    ts: float,
+    name: str,
+    camera_id: int | None,
+    used_keys: set[str] | None = None,
+) -> str:
     x1, y1, x2, y2 = bbox
     cx = (float(x1) + float(x2)) * 0.5
     cy = (float(y1) + float(y2)) * 0.5
@@ -2254,7 +2571,10 @@ def _resolve_work_key(pid: int, bbox: tuple[float, float, float, float], ts: flo
         existing = work_key_by_pid.get(pid)
         if existing is not None:
             st = work_track_state.get(existing, {})
-            if ts - float(st.get("last_seen", 0.0)) <= max(WORK_KEY_MAX_GAP_SEC, 0.1) * 4:
+            if (
+                ts - float(st.get("last_seen", 0.0))
+                <= max(WORK_KEY_MAX_GAP_SEC, 0.1) * 4
+            ):
                 st["center"] = (cx, cy)
                 st["last_seen"] = ts
                 st["last_pid"] = pid
@@ -2288,7 +2608,9 @@ def _resolve_work_key(pid: int, bbox: tuple[float, float, float, float], ts: flo
             dx = float(cx) - float(px)
             dy = float(cy) - float(py)
             dist = (dx * dx + dy * dy) ** 0.5
-            if dist <= WORK_KEY_MATCH_DISTANCE_PX and (best_dist is None or dist < best_dist):
+            if dist <= WORK_KEY_MATCH_DISTANCE_PX and (
+                best_dist is None or dist < best_dist
+            ):
                 best_key = key
                 best_dist = dist
 
@@ -2306,7 +2628,15 @@ def _resolve_work_key(pid: int, bbox: tuple[float, float, float, float], ts: flo
         return best_key
 
 
-def _touch_work_key(work_key: str, pid: int, bbox: tuple[float, float, float, float], ts: float, name: str, camera_id: int | None, face_emb: np.ndarray | None = None) -> str:
+def _touch_work_key(
+    work_key: str,
+    pid: int,
+    bbox: tuple[float, float, float, float],
+    ts: float,
+    name: str,
+    camera_id: int | None,
+    face_emb: np.ndarray | None = None,
+) -> str:
     x1, y1, x2, y2 = bbox
     cx = (float(x1) + float(x2)) * 0.5
     cy = (float(y1) + float(y2)) * 0.5
@@ -2324,14 +2654,20 @@ def _touch_work_key(work_key: str, pid: int, bbox: tuple[float, float, float, fl
         rec["center"] = (cx, cy)
         rec["last_seen"] = ts
         rec["camera_id"] = camera_id
-        rec["name"] = (name or rec.get("name") or "Unknown")
+        rec["name"] = name or rec.get("name") or "Unknown"
         if face_emb is not None:
             rec["embedding"] = face_emb
         work_handoff_pool[work_key] = rec
     return work_key
 
 
-def _match_or_create_face_work_key(face_emb: np.ndarray | None, ts: float, center: tuple[float, float] | None, camera_id: int | None, used_keys: set[str] | None = None) -> str | None:
+def _match_or_create_face_work_key(
+    face_emb: np.ndarray | None,
+    ts: float,
+    center: tuple[float, float] | None,
+    camera_id: int | None,
+    used_keys: set[str] | None = None,
+) -> str | None:
     if not WORK_EMBED_REID_ENABLE or face_emb is None:
         return None
     emb = np.asarray(face_emb, dtype=np.float32).reshape(-1)
@@ -2354,7 +2690,9 @@ def _match_or_create_face_work_key(face_emb: np.ndarray | None, ts: float, cente
                 face_sim = float(np.dot(vec, emb))
             except Exception:
                 continue
-            motion_sim = _motion_similarity(rec.get("center"), center, WORK_HANDOFF_MAX_DIST_PX)
+            motion_sim = _motion_similarity(
+                rec.get("center"), center, WORK_HANDOFF_MAX_DIST_PX
+            )
             score = _hybrid_face_motion_score(face_sim, motion_sim)
             if score > best_score:
                 best_score = score
@@ -2365,7 +2703,9 @@ def _match_or_create_face_work_key(face_emb: np.ndarray | None, ts: float, cente
         for key, rec in list(work_handoff_pool.items()):
             if used_keys and key in used_keys:
                 continue
-            if (ts - float(rec.get("last_seen", 0.0))) > max(1.0, WORK_HANDOFF_POOL_SEC):
+            if (ts - float(rec.get("last_seen", 0.0))) > max(
+                1.0, WORK_HANDOFF_POOL_SEC
+            ):
                 continue
             vec = rec.get("embedding")
             if vec is None:
@@ -2374,7 +2714,9 @@ def _match_or_create_face_work_key(face_emb: np.ndarray | None, ts: float, cente
                 face_sim = float(np.dot(vec, emb))
             except Exception:
                 continue
-            motion_sim = _motion_similarity(rec.get("center"), center, WORK_HANDOFF_MAX_DIST_PX)
+            motion_sim = _motion_similarity(
+                rec.get("center"), center, WORK_HANDOFF_MAX_DIST_PX
+            )
             score = _hybrid_face_motion_score(face_sim, motion_sim)
             if score > best_score:
                 best_score = score
@@ -2401,13 +2743,19 @@ def _match_or_create_face_work_key(face_emb: np.ndarray | None, ts: float, cente
             h["last_seen"] = ts
             h["center"] = center
             h["camera_id"] = camera_id
+            h["name"] = name or rec.get("name") or "Unknown"
             work_handoff_pool[best_key] = h
         return best_key
 
     with work_face_reid_lock:
         work_face_profile_counter += 1
         new_key = f"face:{work_face_profile_counter}"
-        work_face_profiles[new_key] = {"vec": emb, "last_seen": ts, "center": center, "camera_id": camera_id}
+        work_face_profiles[new_key] = {
+            "vec": emb,
+            "last_seen": ts,
+            "center": center,
+            "camera_id": camera_id,
+        }
     with work_handoff_lock:
         work_handoff_pool[new_key] = {
             "embedding": emb,
@@ -2439,7 +2787,9 @@ def _handle_roi_events(
     ey2 = float(y2) + ROI_TOUCH_MARGIN_PX
     x_overlap = max(0.0, min(ex2, float(wx2)) - max(ex1, float(wx1)))
     y_overlap = max(0.0, min(ey2, float(wy2)) - max(ey1, float(wy1)))
-    inside = x_overlap >= ROI_TOUCH_MIN_OVERLAP_PX and y_overlap >= ROI_TOUCH_MIN_OVERLAP_PX
+    inside = (
+        x_overlap >= ROI_TOUCH_MIN_OVERLAP_PX and y_overlap >= ROI_TOUCH_MIN_OVERLAP_PX
+    )
 
     roi_entity = stable_key or f"pid:{pid}"
 
@@ -2459,7 +2809,13 @@ def _handle_roi_events(
             stable_key=f"webroi:{cam}:{roi_entity}:enter",
         )
         if alerted:
-            _queue_event_clip(camera_id, ev, name, time.time(), {"transition": "enter", "roi": "WEBROI"})
+            _queue_event_clip(
+                camera_id,
+                ev,
+                name,
+                time.time(),
+                {"transition": "enter", "roi": "WEBROI"},
+            )
         _set_cross_overlay(camera_id, roi_entity, "WEBROI ENTER", time.time())
         with roi_state_lock:
             roi_state[roi_entity].add("WEBROI")
@@ -2475,7 +2831,13 @@ def _handle_roi_events(
             stable_key=f"webroi:{cam}:{roi_entity}:exit",
         )
         if alerted:
-            _queue_event_clip(camera_id, ev, name, time.time(), {"transition": "exit", "roi": "WEBROI"})
+            _queue_event_clip(
+                camera_id,
+                ev,
+                name,
+                time.time(),
+                {"transition": "exit", "roi": "WEBROI"},
+            )
         _set_cross_overlay(camera_id, roi_entity, "WEBROI EXIT", time.time())
         with roi_state_lock:
             roi_state[roi_entity].discard("WEBROI")
@@ -2500,7 +2862,11 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
             pid_smooth.pop(pid, None)
 
     with pid_identity_lock:
-        stale = [pid for pid, info in pid_identity.items() if now - info.get("ts", 0) > max_age]
+        stale = [
+            pid
+            for pid, info in pid_identity.items()
+            if now - info.get("ts", 0) > max_age
+        ]
         for pid in stale:
             pid_identity.pop(pid, None)
 
@@ -2525,7 +2891,9 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
                 work_timer_state.pop(key, None)
 
     with work_key_lock:
-        stale_pid_keys = [pid for pid in list(work_key_by_pid.keys()) if pid not in active_pids]
+        stale_pid_keys = [
+            pid for pid in list(work_key_by_pid.keys()) if pid not in active_pids
+        ]
         for pid in stale_pid_keys:
             work_key_by_pid.pop(pid, None)
         stale_track_keys = [
@@ -2540,7 +2908,8 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
         stale_face = [
             key
             for key, rec in list(work_face_profiles.items())
-            if (now - float(rec.get("last_seen", 0.0))) > max(1.0, WORK_HANDOFF_POOL_SEC)
+            if (now - float(rec.get("last_seen", 0.0)))
+            > max(1.0, WORK_HANDOFF_POOL_SEC)
         ]
         for key in stale_face:
             work_face_profiles.pop(key, None)
@@ -2549,14 +2918,17 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
         stale_handoff = [
             key
             for key, rec in list(work_handoff_pool.items())
-            if (now - float(rec.get("last_seen", 0.0))) > max(1.0, WORK_HANDOFF_POOL_SEC)
+            if (now - float(rec.get("last_seen", 0.0)))
+            > max(1.0, WORK_HANDOFF_POOL_SEC)
         ]
         for key in stale_handoff:
             work_handoff_pool.pop(key, None)
 
     with work_display_lock:
         valid_keys = set(work_track_state.keys())
-        stale_display = [k for k in list(work_display_map.keys()) if k not in valid_keys]
+        stale_display = [
+            k for k in list(work_display_map.keys()) if k not in valid_keys
+        ]
         for k in stale_display:
             work_display_map.pop(k, None)
 
@@ -2594,12 +2966,20 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
         last_alert_time.pop(k, None)
 
     with unknown_alert_lock:
-        stale_unknown = [k for k, t in unknown_alert_once.items() if (now - float(t)) > max(1.0, ALERT_UNKNOWN_ONCE_TTL_SEC)]
+        stale_unknown = [
+            k
+            for k, t in unknown_alert_once.items()
+            if (now - float(t)) > max(1.0, ALERT_UNKNOWN_ONCE_TTL_SEC)
+        ]
         for k in stale_unknown:
             unknown_alert_once.pop(k, None)
 
     with known_detect_lock:
-        stale_known = [k for k, t in known_detect_last.items() if (now - float(t)) > max(30.0, ALERT_KNOWN_DETECT_MIN_GAP * 5.0)]
+        stale_known = [
+            k
+            for k, t in known_detect_last.items()
+            if (now - float(t)) > max(30.0, ALERT_KNOWN_DETECT_MIN_GAP * 5.0)
+        ]
         for k in stale_known:
             known_detect_last.pop(k, None)
 
@@ -2608,7 +2988,11 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
             if not isinstance(st, dict):
                 continue
             last_emit = dict(st.get("last_emit", {}))
-            stale_le = [k for k, t in last_emit.items() if (now - float(t)) > max(60.0, FEED_NEW_PERSON_REALERT_SEC * 4.0)]
+            stale_le = [
+                k
+                for k, t in last_emit.items()
+                if (now - float(t)) > max(60.0, FEED_NEW_PERSON_REALERT_SEC * 4.0)
+            ]
             for k in stale_le:
                 last_emit.pop(k, None)
             st["last_emit"] = last_emit
@@ -2617,8 +3001,12 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
     with event_clip_lock:
         for cam, jobs in list(event_clip_pending.items()):
             event_clip_pending[cam] = [
-                j for j in jobs if (now - float(j.get("event_ts", now))) <= max(5.0, EVENT_CLIP_SECONDS * 4.0)
+                j
+                for j in jobs
+                if (now - float(j.get("event_ts", now)))
+                <= max(5.0, EVENT_CLIP_SECONDS * 4.0)
             ]
+
 
 # --------------------------------------------------
 # FRAME PROCESSING (OPTIMIZED)
@@ -2633,8 +3021,10 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     """
     h, w = frame.shape[:2]
     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-    x1 = max(0, x1); y1 = max(0, y1)
-    x2 = min(w - 1, x2); y2 = min(h - 1, y2)
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(w - 1, x2)
+    y2 = min(h - 1, y2)
     if x2 <= x1 or y2 <= y1:
         return
 
@@ -2642,14 +3032,14 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     bw = max(1, box_thickness)
     corner = max(8, min(20, int((x2 - x1) * 0.15), int((y2 - y1) * 0.15)))
     pts = [  # (start, end) for each of the 8 bracket lines
-        ((x1, y1), (x1 + corner, y1)),        # TL horizontal
-        ((x1, y1), (x1, y1 + corner)),        # TL vertical
-        ((x2, y1), (x2 - corner, y1)),        # TR horizontal
-        ((x2, y1), (x2, y1 + corner)),        # TR vertical
-        ((x1, y2), (x1 + corner, y2)),        # BL horizontal
-        ((x1, y2), (x1, y2 - corner)),        # BL vertical
-        ((x2, y2), (x2 - corner, y2)),        # BR horizontal
-        ((x2, y2), (x2, y2 - corner)),        # BR vertical
+        ((x1, y1), (x1 + corner, y1)),  # TL horizontal
+        ((x1, y1), (x1, y1 + corner)),  # TL vertical
+        ((x2, y1), (x2 - corner, y1)),  # TR horizontal
+        ((x2, y1), (x2, y1 + corner)),  # TR vertical
+        ((x1, y2), (x1 + corner, y2)),  # BL horizontal
+        ((x1, y2), (x1, y2 - corner)),  # BL vertical
+        ((x2, y2), (x2 - corner, y2)),  # BR horizontal
+        ((x2, y2), (x2, y2 - corner)),  # BR vertical
     ]
     for p1, p2 in pts:
         cv2.line(frame, p1, p2, color, bw, lineType=cv2.LINE_AA)
@@ -2658,7 +3048,7 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1, lineType=cv2.LINE_AA)
 
     # ── Label background ──────────────────────────────────────────────────────
-    font       = cv2.FONT_HERSHEY_SIMPLEX
+    font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 0.55
     font_thick = 1
     (txt_w, txt_h), baseline = cv2.getTextSize(label, font, font_scale, font_thick)
@@ -2666,7 +3056,7 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
 
     # Default: label above the box
     lbl_x1 = x1
-    lbl_y2 = y1                  # bottom of label rectangle = top of box
+    lbl_y2 = y1  # bottom of label rectangle = top of box
     lbl_y1 = lbl_y2 - txt_h - baseline - pad * 2
 
     # If label would go off the top, place it inside the box top instead
@@ -2679,8 +3069,10 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     lbl_x1 = max(0, lbl_x1)
 
     # Semi-transparent filled background — ROI-only blend (NOT full-frame copy)
-    ry1 = max(0, lbl_y1); ry2 = min(h, lbl_y2)
-    rx1 = max(0, lbl_x1); rx2 = min(w, lbl_x2)
+    ry1 = max(0, lbl_y1)
+    ry2 = min(h, lbl_y2)
+    rx1 = max(0, lbl_x1)
+    rx2 = min(w, lbl_x2)
     if ry2 > ry1 and rx2 > rx1:
         roi = frame[ry1:ry2, rx1:rx2]
         overlay_roi = roi.copy()
@@ -2688,12 +3080,30 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
         cv2.addWeighted(overlay_roi, 0.65, roi, 0.35, 0, roi)
 
     # ── Text (shadow + foreground) ────────────────────────────────────────────
-    txt_x  = lbl_x1 + pad
-    txt_y  = lbl_y2 - baseline - pad
+    txt_x = lbl_x1 + pad
+    txt_y = lbl_y2 - baseline - pad
     # Shadow (dark offset for depth)
-    cv2.putText(frame, label, (txt_x + 1, txt_y + 1), font, font_scale, (0, 0, 0),    font_thick + 1, cv2.LINE_AA)
+    cv2.putText(
+        frame,
+        label,
+        (txt_x + 1, txt_y + 1),
+        font,
+        font_scale,
+        (0, 0, 0),
+        font_thick + 1,
+        cv2.LINE_AA,
+    )
     # Always use white text for maximum readability against colored label background
-    cv2.putText(frame, label, (txt_x,     txt_y),     font, font_scale, (255, 255, 255), font_thick,     cv2.LINE_AA)
+    cv2.putText(
+        frame,
+        label,
+        (txt_x, txt_y),
+        font,
+        font_scale,
+        (255, 255, 255),
+        font_thick,
+        cv2.LINE_AA,
+    )
 
 
 def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
@@ -2709,7 +3119,9 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
             is_in_roi = False
             if roi_box and is_person:
                 with roi_state_lock:
-                    is_in_roi = entity_key in roi_state and "WEBROI" in roi_state[entity_key]
+                    is_in_roi = (
+                        entity_key in roi_state and "WEBROI" in roi_state[entity_key]
+                    )
 
             if is_in_roi:
                 color = (0, 165, 255)
@@ -2718,7 +3130,9 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
                 color = (0, 255, 0)
                 draw_label = f"{name}"
 
-            cross_tag = _get_cross_overlay(camera_id, entity_key, now_ts) if is_person else None
+            cross_tag = (
+                _get_cross_overlay(camera_id, entity_key, now_ts) if is_person else None
+            )
             if cross_tag:
                 draw_label = f"{draw_label} [{cross_tag}]"
 
@@ -2730,19 +3144,26 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
                 draw_label = f"{draw_label} {_format_timer(work_seconds)}"
 
             if cross_tag:
-                flash_on = (CROSS_OVERLAY_FLASH_HZ <= 0.0) or (int(now_ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0)
+                flash_on = (CROSS_OVERLAY_FLASH_HZ <= 0.0) or (
+                    int(now_ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0
+                )
                 color = (0, 0, 255) if flash_on else (0, 180, 255)
                 thickness = 3 if flash_on else 2
             else:
                 thickness = 2
-            _draw_det_bbox(frame, x1, y1, x2, y2, draw_label, color, box_thickness=thickness)
+            _draw_det_bbox(
+                frame, x1, y1, x2, y2, draw_label, color, box_thickness=thickness
+            )
         except Exception:
             continue
 
 
-def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False, camera_id=None):
+def process_frame(
+    frame, yolo_input_resolution=None, no_pre_resize: bool = False, camera_id=None
+):
     # Silence extremely verbose per-frame prints unless explicitly enabled.
     if not PROCESS_FRAME_DEBUG:
+
         def print(*args, **kwargs):  # type: ignore[no-redef]
             return
 
@@ -2757,7 +3178,7 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
 
     now = time.time()
     orig_h, orig_w = frame.shape[:2]
-    process_frame.frame_counter = getattr(process_frame, 'frame_counter', 0) + 1
+    process_frame.frame_counter = getattr(process_frame, "frame_counter", 0) + 1
     # Per-camera counter — avoids all cameras triggering face-id simultaneously.
     cam_frame_counter = _get_cam_frame_counter(camera_id)
 
@@ -2779,7 +3200,9 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
         wy2 = int((web_roi["y"] + web_roi["h"]) * orig_h)
         roi_box = (wx1, wy1, wx2, wy2)
         if PROCESS_FRAME_DEBUG or process_frame.frame_counter % 60 == 0:
-            print(f"📏 ROI AREA: ({wx1},{wy1}) to ({wx2},{wy2}) [{wx2-wx1}x{wy2-wy1}px]")
+            print(
+                f"📏 ROI AREA: ({wx1},{wy1}) to ({wx2},{wy2}) [{wx2 - wx1}x{wy2 - wy1}px]"
+            )
 
     should_process = (
         process_frame.frame_counter % YOLO_PROCESS_EVERY_N_FRAMES == 0
@@ -2821,15 +3244,21 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
     yolo_imgsz = int(max(target_w, target_h))
     raw_dets = []
     yolo_names = getattr(yolo_model, "names", {})
+
     def _label_for(cls_id):
         try:
             if isinstance(yolo_names, dict):
                 return str(yolo_names.get(cls_id, cls_id))
-            if isinstance(yolo_names, (list, tuple)) and cls_id is not None and cls_id < len(yolo_names):
+            if (
+                isinstance(yolo_names, (list, tuple))
+                and cls_id is not None
+                and cls_id < len(yolo_names)
+            ):
                 return str(yolo_names[cls_id])
         except Exception:
             pass
         return str(cls_id) if cls_id is not None else "object"
+
     use_tiling = bool(YOLO_TILING and no_pre_resize)
     with torch.inference_mode():
         with torch.cuda.amp.autocast(enabled=amp_enabled):
@@ -2858,17 +3287,23 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
                             conf = float(b.conf[0]) if hasattr(b, "conf") else None
                         except Exception:
                             conf = None
-                        if PERSON_CLASS_IDS and cls_id is not None and cls_id not in PERSON_CLASS_IDS:
+                        if (
+                            PERSON_CLASS_IDS
+                            and cls_id is not None
+                            and cls_id not in PERSON_CLASS_IDS
+                        ):
                             continue
                         if conf is not None and conf < YOLO_MIN_CONF:
                             continue
                         bx1, by1, bx2, by2 = b.xyxy[0].tolist()
-                        raw_dets.append({
-                            "box": [bx1 + x0, by1 + y0, bx2 + x0, by2 + y0],
-                            "cls_id": cls_id,
-                            "conf": conf,
-                            "label": _label_for(cls_id),
-                        })
+                        raw_dets.append(
+                            {
+                                "box": [bx1 + x0, by1 + y0, bx2 + x0, by2 + y0],
+                                "cls_id": cls_id,
+                                "conf": conf,
+                                "label": _label_for(cls_id),
+                            }
+                        )
                 processed_h, processed_w = orig_h, orig_w
                 results = None
             else:
@@ -2881,7 +3316,7 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
 
     try:
         with stats_lock:
-            stats_counters['detection_runs'] += 1
+            stats_counters["detection_runs"] += 1
     except Exception:
         pass
 
@@ -2902,7 +3337,11 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
             except Exception:
                 conf = None
 
-            if PERSON_CLASS_IDS and cls_id is not None and cls_id not in PERSON_CLASS_IDS:
+            if (
+                PERSON_CLASS_IDS
+                and cls_id is not None
+                and cls_id not in PERSON_CLASS_IDS
+            ):
                 continue
             if conf is not None and conf < YOLO_MIN_CONF:
                 continue
@@ -2914,12 +3353,14 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
             x2 *= scale_x
             y1 *= scale_y
             y2 *= scale_y
-            raw_dets.append({
-                "box": [x1, y1, x2, y2],
-                "cls_id": cls_id,
-                "conf": conf,
-                "label": _label_for(cls_id),
-            })
+            raw_dets.append(
+                {
+                    "box": [x1, y1, x2, y2],
+                    "cls_id": cls_id,
+                    "conf": conf,
+                    "label": _label_for(cls_id),
+                }
+            )
 
     if USE_BYTETRACK:
         raw_dets = _apply_bytetrack(raw_dets, frame, camera_id, _label_for)
@@ -2940,13 +3381,15 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
     # each result back to the YOLO box.  This avoids N sequential model
     # calls and keeps the feed smooth even with many people in view.
     # ----------------------------------------------------------------
-    can_faceid = bool(FACE_ENABLE and faceid and faceid.app and faceid.embeddings is not None)
-    should_faceid_now = (cam_frame_counter % max(1, FACE_EVERY_N_FRAMES) == 0)
+    can_faceid = bool(
+        FACE_ENABLE and faceid and faceid.app and faceid.embeddings is not None
+    )
+    should_faceid_now = cam_frame_counter % max(1, FACE_EVERY_N_FRAMES) == 0
 
     # Collect person boxes/indices for batch call (we need PIDs first, so
     # we do a lightweight first pass to resolve PIDs, then batch face-id).
-    person_entries = []   # (list_index, pid, x1, y1, x2, y2)
-    resolved_pids = []    # pid per raw_det index, filled in main loop below
+    person_entries = []  # (list_index, pid, x1, y1, x2, y2)
+    resolved_pids = []  # pid per raw_det index, filled in main loop below
 
     for i, det in enumerate(raw_dets):
         x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
@@ -2955,7 +3398,9 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
             if pid_tracker and track_id is not None:
                 tid = int(track_id)
                 with pid_tracker_op_lock:
-                    pid = pid_tracker.assign_pid(tid, (x1, y1, x2, y2), ts, window=PID_REUSE_WINDOW)
+                    pid = pid_tracker.assign_pid(
+                        tid, (x1, y1, x2, y2), ts, window=PID_REUSE_WINDOW
+                    )
                     pid_tracker.mark_active(pid, (x1, y1, x2, y2), ts)
                 active_track_ids.append(tid)
             elif track_id is not None:
@@ -2963,8 +3408,10 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
             else:
                 q = 10
                 stable_id = (
-                    int(round(x1 / q) * q), int(round(y1 / q) * q),
-                    int(round(x2 / q) * q), int(round(y2 / q) * q),
+                    int(round(x1 / q) * q),
+                    int(round(y1 / q) * q),
+                    int(round(x2 / q) * q),
+                    int(round(y2 / q) * q),
                 )
                 pid = int(hash(stable_id) & 0x7FFFFFFF)
         except Exception:
@@ -2979,13 +3426,15 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
     # Single batched face-id call (one GPU inference for all people).
     # Non-blocking lock: if another camera thread is already running InsightFace,
     # skip this frame — _cache_pid_name will return the last known name.
-    batch_results: dict[int, tuple] = {}   # det_index -> (name, score, emb)
+    batch_results: dict[int, tuple] = {}  # det_index -> (name, score, emb)
     if can_faceid and should_faceid_now and person_entries:
         face_lock_acquired = faceid_inference_lock.acquire(blocking=False)
         if face_lock_acquired:
             face_start = time.time()
             try:
-                boxes_for_batch = [(x1, y1, x2, y2) for _, _, x1, y1, x2, y2 in person_entries]
+                boxes_for_batch = [
+                    (x1, y1, x2, y2) for _, _, x1, y1, x2, y2 in person_entries
+                ]
                 batch = faceid.recognize_batch(frame, boxes_for_batch)
                 for (det_i, pid_i, *_), result in zip(person_entries, batch):
                     batch_results[det_i] = result
@@ -2995,7 +3444,9 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
                 faceid_inference_lock.release()
             face_time_total_ms = (time.time() - face_start) * 1000
             if cam_frame_counter % (max(1, FACE_EVERY_N_FRAMES) * 10) == 0:
-                logger.info(f"⏱️ Batch face recognition ({len(person_entries)} people): {face_time_total_ms:.1f}ms")
+                logger.info(
+                    f"⏱️ Batch face recognition ({len(person_entries)} people): {face_time_total_ms:.1f}ms"
+                )
             t = log_step("faceid", t)
         # else: lock busy — skip face-id this frame, use cached names
     else:
@@ -3044,12 +3495,17 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
                 emb_key = _match_or_create_face_work_key(
                     face_emb,
                     ts,
-                    center=((float(x1) + float(x2)) * 0.5, (float(y1) + float(y2)) * 0.5),
+                    center=(
+                        (float(x1) + float(x2)) * 0.5,
+                        (float(y1) + float(y2)) * 0.5,
+                    ),
                     camera_id=camera_id,
                     used_keys=used_work_keys,
                 )
                 if emb_key is not None:
-                    work_key = _touch_work_key(emb_key, pid, (x1, y1, x2, y2), ts, name, camera_id, face_emb)
+                    work_key = _touch_work_key(
+                        emb_key, pid, (x1, y1, x2, y2), ts, name, camera_id, face_emb
+                    )
 
             # Then: tracker-anchored key when available to keep ID/timer stable.
             if work_key is None and track_id is not None:
@@ -3064,9 +3520,18 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
                         face_emb,
                     )
                 except Exception:
-                    work_key = _resolve_work_key(pid, (x1, y1, x2, y2), ts, name, camera_id, used_keys=used_work_keys)
+                    work_key = _resolve_work_key(
+                        pid,
+                        (x1, y1, x2, y2),
+                        ts,
+                        name,
+                        camera_id,
+                        used_keys=used_work_keys,
+                    )
             if work_key is None:
-                work_key = _resolve_work_key(pid, (x1, y1, x2, y2), ts, name, camera_id, used_keys=used_work_keys)
+                work_key = _resolve_work_key(
+                    pid, (x1, y1, x2, y2), ts, name, camera_id, used_keys=used_work_keys
+                )
             used_work_keys.add(work_key)
             display_id = _get_or_create_work_display_id(work_key)
 
@@ -3089,7 +3554,9 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
         if is_person and name != "Unknown":
             known_key = work_key or f"name:{name.lower()}" if name else f"pid:{pid}"
             if _should_emit_known_detect(str(known_key), ts):
-                send_alert(display_name, f"P3 | CAM{_camera_key(camera_id)} | PERSON_DETECTED")
+                send_alert(
+                    display_name, f"P3 | CAM{_camera_key(camera_id)} | PERSON_DETECTED"
+                )
                 alert_sent = True
         if PROCESS_FRAME_DEBUG:
             print(f"  Alert sent: {alert_sent}")
@@ -3099,7 +3566,10 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
 
         alert_entity_key = work_key or f"pid:{pid}"
         with roi_state_lock:
-            is_in_roi = alert_entity_key in roi_state and "WEBROI" in roi_state[alert_entity_key]
+            is_in_roi = (
+                alert_entity_key in roi_state
+                and "WEBROI" in roi_state[alert_entity_key]
+            )
 
         in_roi_now = False
         if roi_box and is_person:
@@ -3127,21 +3597,34 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
             color = (0, 255, 0)
             draw_label = f"{display_name}"
 
-        cross_tag = _get_cross_overlay(camera_id, alert_entity_key, ts) if is_person else None
+        cross_tag = (
+            _get_cross_overlay(camera_id, alert_entity_key, ts) if is_person else None
+        )
         if cross_tag:
             draw_label = f"{draw_label} [{cross_tag}]"
-            flash_on = (CROSS_OVERLAY_FLASH_HZ <= 0.0) or (int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0)
+            flash_on = (CROSS_OVERLAY_FLASH_HZ <= 0.0) or (
+                int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0
+            )
             color = (0, 0, 255) if flash_on else (0, 180, 255)
 
         if WORK_TIMER_ENABLE and is_person:
             draw_label = f"{draw_label} {work_timer_txt}"
 
-        thickness = 3 if cross_tag and ((CROSS_OVERLAY_FLASH_HZ <= 0.0) or (int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0)) else 2
+        thickness = (
+            3
+            if cross_tag
+            and (
+                (CROSS_OVERLAY_FLASH_HZ <= 0.0)
+                or (int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0)
+            )
+            else 2
+        )
         try:
-            _draw_det_bbox(frame, x1, y1, x2, y2, draw_label, color, box_thickness=thickness)
+            _draw_det_bbox(
+                frame, x1, y1, x2, y2, draw_label, color, box_thickness=thickness
+            )
         except Exception as e:
             print(f"[DRAW] Failed to draw bounding box: {e}")
-
 
         if PROCESS_FRAME_DEBUG:
             print(f"  Center: ({cx},{cy})")
@@ -3159,21 +3642,23 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
                 stable_key=work_key,
             )
 
-        det_items.append({
-            "pid": pid,
-            "box": (x1, y1, x2, y2),
-            "label": label,
-            "cls_id": cls_id,
-            "name": name,
-            "display_name": display_name,
-            "center": (cx, cy),
-            "is_person": is_person,
-            "is_vehicle": is_vehicle,
-            "is_animal": is_animal,
-            "is_plate": is_plate,
-            "work_seconds": work_seconds,
-            "work_key": work_key,
-        })
+        det_items.append(
+            {
+                "pid": pid,
+                "box": (x1, y1, x2, y2),
+                "label": label,
+                "cls_id": cls_id,
+                "name": name,
+                "display_name": display_name,
+                "center": (cx, cy),
+                "is_person": is_person,
+                "is_vehicle": is_vehicle,
+                "is_animal": is_animal,
+                "is_plate": is_plate,
+                "work_seconds": work_seconds,
+                "work_key": work_key,
+            }
+        )
 
     if pid_tracker and active_track_ids:
         with pid_tracker_op_lock:
@@ -3228,26 +3713,30 @@ def process_frame(frame, yolo_input_resolution=None, no_pre_resize: bool = False
             yolo_ms = (t_yolo - t_resize) * 1000.0
             draw_ms = max(0.0, (t_draw - t_yolo) * 1000.0 - face_time_total_ms)
             with perf_lock:
-                perf_counters['frames'] += 1
-                perf_counters['resize_ms'] += resize_ms
-                perf_counters['yolo_ms'] += yolo_ms
-                perf_counters['faceid_ms'] += face_time_total_ms
-                perf_counters['draw_ms'] += draw_ms
-                perf_counters['total_ms'] += total_ms
+                perf_counters["frames"] += 1
+                perf_counters["resize_ms"] += resize_ms
+                perf_counters["yolo_ms"] += yolo_ms
+                perf_counters["faceid_ms"] += face_time_total_ms
+                perf_counters["draw_ms"] += draw_ms
+                perf_counters["total_ms"] += total_ms
         except Exception:
             pass
     try:
         # Offload event clip encoding to a background thread so JPEG encode
         # does not block the processing thread and cause frame drops.
         import concurrent.futures as _cf
-        _clip_pool = getattr(_event_clip_on_frame, '_pool', None)
+
+        _clip_pool = getattr(_event_clip_on_frame, "_pool", None)
         if _clip_pool is None:
-            _clip_pool = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix='clip')
+            _clip_pool = _cf.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="clip"
+            )
             _event_clip_on_frame._pool = _clip_pool
         _clip_pool.submit(_event_clip_on_frame, camera_id, frame.copy(), time.time())
     except Exception:
         pass
     return frame
+
 
 async def process_alert_queue():
     """Process alerts from the queue in the main event loop"""
@@ -3261,7 +3750,9 @@ async def process_alert_queue():
                     payload_obj = dict(item)
                     person = payload_obj.get("person", "SYSTEM")
                     event = payload_obj.get("event", "")
-                    payload_obj.setdefault("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
+                    payload_obj.setdefault(
+                        "timestamp", time.strftime("%Y-%m-%d %H:%M:%S")
+                    )
                 else:
                     try:
                         person, event = item
@@ -3284,29 +3775,6 @@ async def process_alert_queue():
     except Exception as e:
         logger.error(f"Alert queue processor error: {e}")
 
-# VIDEO PROCESSING PIPELINE (PM MODE)
-# --------------------------------------------------
-# async def consume_incoming_track(track, queue):
-#     # Deprecated: kept for compatibility (old single-task approach).
-#     loop = asyncio.get_event_loop()
-#     while True:
-#         frame = await track.recv()
-#         img = frame.to_ndarray(format="bgr24")
-#         processed = await loop.run_in_executor(None, process_frame, img, pid_tracker)
-#         queue.append(processed)
-
-# async def processing_loop(latest_holder, stop_event):
-#     last_ts = 0
-#     while not stop_event.is_set():
-#         item = latest_holder.get("frame")
-#         ts = latest_holder.get("ts", 0)
-
-#         if item is None or ts == last_ts:
-#             await asyncio.sleep(0.005)
-#             continue
-
-#         last_ts = ts
-#         process_frame(item, pid_tracker)
 async def processing_loop(latest_holder, stop_event):
     last_ts = 0
     frame_id = 0
@@ -3333,11 +3801,10 @@ async def processing_loop(latest_holder, stop_event):
         )
 
 
-
-
 # --------------------------------------------------
 # OUTGOING PROCESSED TRACK (optimized)
 # --------------------------------------------------
+
 
 class SharedServerCamera:
     """Shared server camera capture + processing loop.
@@ -3351,7 +3818,9 @@ class SharedServerCamera:
         self._thread = None
         self._stop_evt = threading.Event()
         self._cap = None
-        self._latest = np.zeros((SERVER_CAMERA_HEIGHT, SERVER_CAMERA_WIDTH, 3), np.uint8)
+        self._latest = np.zeros(
+            (SERVER_CAMERA_HEIGHT, SERVER_CAMERA_WIDTH, 3), np.uint8
+        )
         self._camera_id = camera_id
         self._rtsp_url = _get_rtsp_url(camera_id)
         self._last_open_fail = 0.0
@@ -3449,6 +3918,7 @@ class SharedServerCamera:
         IMPORTANT: The returned cap is owned by the CALLER.  This method never
         stores to self._cap so there is no shared mutable state to race on.
         """
+
         def _open_rtsp(url: str):
             cap = cv2.VideoCapture()
             try:
@@ -3555,7 +4025,9 @@ class SharedServerCamera:
         # as the GPU allows, and _latest is always the most recent output.
         _cap_stop = threading.Event()
         cap_thread = threading.Thread(
-            target=self._capture_worker, args=(_cap_stop,), daemon=True,
+            target=self._capture_worker,
+            args=(_cap_stop,),
+            daemon=True,
             name=f"cam{self._camera_id}-capture",
         )
         cap_thread.start()
@@ -3618,7 +4090,9 @@ _background_analytics_cameras = []
 _background_analytics_lock = threading.Lock()
 
 
-def _get_shared_cctv_camera(camera_id: int | None, process: bool = True) -> SharedServerCamera:
+def _get_shared_cctv_camera(
+    camera_id: int | None, process: bool = True
+) -> SharedServerCamera:
     try:
         cam_id = int(camera_id) if camera_id is not None else 1
     except Exception:
@@ -3660,7 +4134,9 @@ def _start_background_cctv_analytics() -> None:
                 _background_analytics_cameras.append(cam)
                 started.append(cid)
             except Exception as e:
-                logger.warning(f"Failed to start background analytics for camera {cid}: {e}")
+                logger.warning(
+                    f"Failed to start background analytics for camera {cid}: {e}"
+                )
 
     if started:
         logger.info(f"✅ Background CCTV analytics enabled for cameras: {started}")
@@ -3680,7 +4156,9 @@ def _stop_background_cctv_analytics() -> None:
 
 
 class SharedServerCameraTrack(VideoStreamTrack):
-    def __init__(self, fps=SERVER_CAMERA_FPS, camera_id: int | None = None, process: bool = True):
+    def __init__(
+        self, fps=SERVER_CAMERA_FPS, camera_id: int | None = None, process: bool = True
+    ):
         super().__init__()
         self.fps = int(fps)
         self.i = 0
@@ -3688,7 +4166,9 @@ class SharedServerCameraTrack(VideoStreamTrack):
         self._closed = False
         self._camera_id = camera_id
         self._process = bool(process)
-        self._shared_camera = _get_shared_cctv_camera(self._camera_id, process=self._process)
+        self._shared_camera = _get_shared_cctv_camera(
+            self._camera_id, process=self._process
+        )
         self._shared_camera.add_client()
         # Tracks the ideal next-send wall-clock time so we don't drift when
         # focus/grid track.
@@ -3702,7 +4182,9 @@ class SharedServerCameraTrack(VideoStreamTrack):
         wait = self._next_send_t - now
         if wait > 0:
             await asyncio.sleep(wait)
-        self._next_send_t = max(self._next_send_t + (1.0 / max(1, self.fps)), monotonic())
+        self._next_send_t = max(
+            self._next_send_t + (1.0 / max(1, self.fps)), monotonic()
+        )
 
         frame = self._shared_camera.get_latest()
         vf = VideoFrame.from_ndarray(frame, format="bgr24")
@@ -3720,6 +4202,7 @@ class SharedServerCameraTrack(VideoStreamTrack):
                 pass
         return super().stop()
 
+
 # --------------------------------------------------
 # HTTP ROUTES
 # --------------------------------------------------
@@ -3736,7 +4219,11 @@ async def super_admin_dashboard_page(request):
     if tail and react_dist.exists():
         try:
             candidate = (react_dist / tail).resolve()
-            if str(candidate).startswith(str(react_dist.resolve())) and candidate.exists() and candidate.is_file():
+            if (
+                str(candidate).startswith(str(react_dist.resolve()))
+                and candidate.exists()
+                and candidate.is_file()
+            ):
                 return web.FileResponse(candidate)
         except Exception:
             pass
@@ -3756,6 +4243,7 @@ async def super_admin_dashboard_page(request):
         ),
     )
 
+
 # SAVE WEB ROI
 async def save_roi(request):
     user = request.get("user") or {}
@@ -3763,15 +4251,19 @@ async def save_roi(request):
     if AUTH_READY and can and not can(request.get("user") or {}, "rules", "manage"):
         return web.Response(status=403)
     global web_roi
-   
+
     try:
         data = await request.json()
     except:
-        return web.json_response({"status":"error","reason":"invalid json"}, status=400)
+        return web.json_response(
+            {"status": "error", "reason": "invalid json"}, status=400
+        )
 
-    for k in ("x","y","w","h"):
+    for k in ("x", "y", "w", "h"):
         if k not in data:
-            return web.json_response({"status":"error","reason":f"missing {k}"}, status=400)
+            return web.json_response(
+                {"status": "error", "reason": f"missing {k}"}, status=400
+            )
         data[k] = max(0.0, min(1.0, float(data[k])))
     data["enabled"] = bool(data.get("enabled", True))
 
@@ -3782,13 +4274,14 @@ async def save_roi(request):
     with roi_state_lock:
         roi_state.clear()
     roi_updated_at = time.time()
-   
+
     # Save to file
     json.dump(data, open(web_roi_file, "w"))
-   
+
     logger.info(f"✅ ROI UPDATED: {web_roi}")
-   
-    return web.json_response({"status":"saved","roi":data})
+
+    return web.json_response({"status": "saved", "roi": data})
+
 
 # CAMERA RULES API
 async def rules_schema(request):
@@ -3797,6 +4290,7 @@ async def rules_schema(request):
     if AUTH_READY and can and not can(request.get("user") or {}, "rules", "view"):
         return web.Response(status=403)
     return web.json_response(RULES_SCHEMA)
+
 
 async def get_rules(request):
     user = request.get("user") or {}
@@ -3810,12 +4304,17 @@ async def get_rules(request):
         return web.json_response(data)
     parsed_id = _parse_camera_id_value(camera_id)
     try:
-        if AUTH_READY and user_can_access_camera and not await user_can_access_camera(request.get("user") or {}, parsed_id):
+        if (
+            AUTH_READY
+            and user_can_access_camera
+            and not await user_can_access_camera(request.get("user") or {}, parsed_id)
+        ):
             return web.Response(status=403)
     except Exception:
         return web.Response(status=403)
     rules = _get_camera_rules(parsed_id)
     return web.json_response({"camera_id": _camera_key(parsed_id), "rules": rules})
+
 
 async def save_rules(request):
     user = request.get("user") or {}
@@ -3825,56 +4324,40 @@ async def save_rules(request):
     try:
         data = await request.json()
     except Exception:
-        return web.json_response({"status": "error", "reason": "invalid json"}, status=400)
+        return web.json_response(
+            {"status": "error", "reason": "invalid json"}, status=400
+        )
 
-    camera_id = data.get("camera_id") or data.get("cameraId") or request.query.get("camera_id") or request.query.get("cameraId")
+    camera_id = (
+        data.get("camera_id")
+        or data.get("cameraId")
+        or request.query.get("camera_id")
+        or request.query.get("cameraId")
+    )
     parsed_id = _parse_camera_id_value(camera_id)
     if camera_id is None:
-        return web.json_response({"status": "error", "reason": "camera_id required"}, status=400)
+        return web.json_response(
+            {"status": "error", "reason": "camera_id required"}, status=400
+        )
 
     try:
-        if AUTH_READY and user_can_access_camera and not await user_can_access_camera(request.get("user") or {}, parsed_id):
+        if (
+            AUTH_READY
+            and user_can_access_camera
+            and not await user_can_access_camera(request.get("user") or {}, parsed_id)
+        ):
             return web.Response(status=403)
     except Exception:
         return web.Response(status=403)
 
-    rules_payload = data.get("rules") if isinstance(data, dict) and "rules" in data else data
+    rules_payload = (
+        data.get("rules") if isinstance(data, dict) and "rules" in data else data
+    )
     normalized = _set_camera_rules(parsed_id, rules_payload)
-    return web.json_response({"status": "saved", "camera_id": _camera_key(parsed_id), "rules": normalized})
+    return web.json_response(
+        {"status": "saved", "camera_id": _camera_key(parsed_id), "rules": normalized}
+    )
 
-# TEST ALERT ENDPOINT
-async def test_alert(request):
-    user = request.get("user") or {}
-    require_role(user, ["admin", "member"])
-    logger.info("=== MANUAL TEST ALERT REQUESTED ===")
-   
-    # Test send_alert function
-    send_alert("TEST_USER", "MANUAL_TEST_ALERT")
-   
-    # Also send a direct test
-    test_payload = json.dumps({
-        "person": "DIRECT_TEST",
-        "event": "DIRECT_MANUAL_ALERT",
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    })
-   
-    channels_sent = 0
-    for ch in list(alert_channels):
-        try:
-            if hasattr(ch, 'readyState') and ch.readyState == 'open':
-                ch.send(test_payload)
-                channels_sent += 1
-                logger.info(f"Direct test sent to {getattr(ch, 'label', 'unknown')}")
-            else:
-                logger.warning(f"Channel not open, state: {getattr(ch, 'readyState', 'unknown')}")
-        except Exception as e:
-            logger.warning(f"Direct test failed: {e}")
-   
-    return web.json_response({
-        "status": "sent",
-        "channels": len(alert_channels),
-        "channels_sent_to": channels_sent
-    })
 
 # FACE ENROLL ENDPOINT
 async def face_enroll(request):
@@ -3917,7 +4400,9 @@ async def face_enroll(request):
             faceid.load()  # Reload database with new embeddings
             send_enrollment_alert(f"Database reloaded - {name} ready for recognition")
 
-        return web.json_response({"status": "ok" if success else "failed", "message": message})
+        return web.json_response(
+            {"status": "ok" if success else "failed", "message": message}
+        )
     finally:
         ENROLLMENT_ACTIVE = False
 
@@ -3986,11 +4471,13 @@ async def face_enroll_frames(request):
             if face_app:
                 detected = face_app.get(img)
                 if detected:
-                    best = max(detected, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
-                    face_data_list.append({
-                        "bbox": best.bbox,
-                        "pose": getattr(best, "pose", None)
-                    })
+                    best = max(
+                        detected,
+                        key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
+                    )
+                    face_data_list.append(
+                        {"bbox": best.bbox, "pose": getattr(best, "pose", None)}
+                    )
                 else:
                     face_data_list.append({"bbox": [0, 0, img.shape[1], img.shape[0]]})
             else:
@@ -4001,15 +4488,22 @@ async def face_enroll_frames(request):
     # Liveness check
     liveness_score = 1.0
     if LIVENESS_ENABLED and face_data_list:
-        is_live, liveness_score, liveness_details = check_frames_liveness(frames, face_data_list)
-        print(f"[ENROLL-FRAMES] Liveness: {is_live} score={liveness_score:.3f} details={liveness_details}")
+        is_live, liveness_score, liveness_details = check_frames_liveness(
+            frames, face_data_list
+        )
+        print(
+            f"[ENROLL-FRAMES] Liveness: {is_live} score={liveness_score:.3f} details={liveness_details}"
+        )
         if not is_live:
-            return web.json_response({
-                "status": "failed",
-                "error": "liveness_failed",
-                "message": f"Liveness check failed (score={liveness_score:.2f}). Please use a live camera.",
-                "liveness_score": round(liveness_score, 3),
-            }, status=400)
+            return web.json_response(
+                {
+                    "status": "failed",
+                    "error": "liveness_failed",
+                    "message": f"Liveness check failed (score={liveness_score:.2f}). Please use a live camera.",
+                    "liveness_score": round(liveness_score, 3),
+                },
+                status=400,
+            )
 
     # Enroll into client-scoped DB
     success, message = enroll_face(name, frames, client_id=client_id)
@@ -4017,12 +4511,15 @@ async def face_enroll_frames(request):
         faceid.load()
         send_enrollment_alert(f"[API] {name} enrolled via dashboard")
 
-    return web.json_response({
-        "status": "ok" if success else "failed",
-        "message": message,
-        "liveness_score": round(liveness_score, 3),
-        "frames_used": len(frames),
-    })
+    return web.json_response(
+        {
+            "status": "ok" if success else "failed",
+            "message": message,
+            "liveness_score": round(liveness_score, 3),
+            "frames_used": len(frames),
+        }
+    )
+
 
 # LIST FACES ENDPOINT
 async def face_list(request):
@@ -4058,28 +4555,42 @@ async def recognition_logs_handler(request):
                 continue
             name = entry.name
             # Count image files
-            images = [f for f in entry.iterdir()
-                       if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')]
+            images = [
+                f
+                for f in entry.iterdir()
+                if f.is_file()
+                and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+            ]
             if not images:
                 # Check one level deeper (some have nested folders)
                 for sub in entry.iterdir():
                     if sub.is_dir():
-                        images += [f for f in sub.iterdir()
-                                    if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')]
+                        images += [
+                            f
+                            for f in sub.iterdir()
+                            if f.is_file()
+                            and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+                        ]
             # Enrollment date = directory modification time
             import datetime
-            mtime = entry.stat().st_mtime
-            enrolled_at = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
 
-            enrolled.append({
-                "name": name,
-                "image_count": len(images),
-                "enrolled_at": enrolled_at,
-            })
+            mtime = entry.stat().st_mtime
+            enrolled_at = datetime.datetime.fromtimestamp(mtime).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
+            enrolled.append(
+                {
+                    "name": name,
+                    "image_count": len(images),
+                    "enrolled_at": enrolled_at,
+                }
+            )
     except Exception as e:
         logger.warning("Failed reading faces_raw: %s", e)
 
     return web.json_response({"enrolled": enrolled})
+
 
 # DELETE FACE ENDPOINT
 async def face_delete(request):
@@ -4115,6 +4626,7 @@ async def face_delete(request):
 
     # Remove raw images for this client+person
     import shutil
+
     for raw_candidate in [
         RAW_DIR / str(client_id) / name if client_id else None,
         RAW_DIR / name,
@@ -4147,9 +4659,11 @@ async def list_clients(request):
             ORDER BY created_at DESC
             """
         )
+
     def _serialize_value(val):
         try:
             import datetime
+
             if isinstance(val, (datetime.date, datetime.datetime)):
                 return val.isoformat()
         except Exception:
@@ -4189,15 +4703,18 @@ async def get_camera(request):
     cam = await db_get_camera(camera_id)
     return web.json_response(cam)
 
+
 async def get_me(request):
     if not AUTH_READY:
         return web.json_response({"error": "auth modules not available"}, status=503)
     user = request.get("user") or {}
-    return web.json_response({
-        "user_id": user.get("user_id"),
-        "role": user.get("role"),
-        "client_id": user.get("client_id"),
-    })
+    return web.json_response(
+        {
+            "user_id": user.get("user_id"),
+            "role": user.get("role"),
+            "client_id": user.get("client_id"),
+        }
+    )
 
 
 # SUPER ADMIN: LIST CLIENTS METADATA
@@ -4226,6 +4743,7 @@ async def list_clients(request):
     def _serialize_value(val):
         try:
             import datetime
+
             if isinstance(val, (datetime.date, datetime.datetime)):
                 return val.isoformat()
         except Exception:
@@ -4238,6 +4756,7 @@ async def list_clients(request):
 
     return web.json_response([_serialize_row(r) for r in rows])
 
+
 # WEBSOCKET HANDLER
 async def websocket_handler(request):
     user = request.get("user") or {}
@@ -4246,7 +4765,7 @@ async def websocket_handler(request):
         return web.Response(status=403)
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-   
+
     async def _process_enrollment_session(ws_id):
         """Background task: collect good frames until quality target met."""
         target_embeddings = 6
@@ -4257,17 +4776,17 @@ async def websocket_handler(request):
                 session = enroll_sessions.get(ws_id)
                 if not session:
                     return
-                target_met = len(session.get('good_frames', [])) >= target_embeddings
+                target_met = len(session.get("good_frames", [])) >= target_embeddings
                 if target_met:
                     break
-                frames = session.get('frames', [])
-                processed = session.setdefault('processed_frames', 0)
-                good_frames = session.setdefault('good_frames', [])
-                yaw_count = session.setdefault('yaw_count', {})
+                frames = session.get("frames", [])
+                processed = session.setdefault("processed_frames", 0)
+                good_frames = session.setdefault("good_frames", [])
+                yaw_count = session.setdefault("yaw_count", {})
                 while processed < len(frames) and len(good_frames) < target_embeddings:
                     frame = frames[processed]
                     processed += 1
-                    session['processed_frames'] = processed
+                    session["processed_frames"] = processed
                     if not face_app:
                         continue
                     faces = face_app.get(frame)
@@ -4299,49 +4818,65 @@ async def websocket_handler(request):
                     if len(good_frames) >= 6:
                         good_frames.append(frame)
                         count = len(good_frames)
-                        send_enrollment_alert(f"Good face captured ({count}/{target_embeddings})")
+                        send_enrollment_alert(
+                            f"Good face captured ({count}/{target_embeddings})"
+                        )
                         if count >= target_embeddings:
-                            session['done'] = True
+                            session["done"] = True
                             send_enrollment_alert("Enrollment complete")
                             break
                         continue
                     good_frames.append(frame)
                     count = len(good_frames)
-                    send_enrollment_alert(f"Good face captured ({count}/{target_embeddings})")
+                    send_enrollment_alert(
+                        f"Good face captured ({count}/{target_embeddings})"
+                    )
                     if count >= target_embeddings:
-                        session['done'] = True
+                        session["done"] = True
                         send_enrollment_alert("Enrollment complete")
                         break
                 if len(good_frames) >= target_embeddings:
-                    session['done'] = True
+                    session["done"] = True
                     break
                 await asyncio.sleep(0.25)
             session = enroll_sessions.pop(ws_id, None)
             if not session:
                 return
-            name = session.get('name')
-            good_frames = session.get('good_frames', [])
+            name = session.get("name")
+            good_frames = session.get("good_frames", [])
             if not good_frames:
-                send_enrollment_alert(f"No valid faces captured for {name} - enrollment failed")
+                send_enrollment_alert(
+                    f"No valid faces captured for {name} - enrollment failed"
+                )
                 try:
-                    aws = session.get('ws')
+                    aws = session.get("ws")
                     if aws and not aws.closed:
-                        await aws.send_json({"action": "enroll_face", "status": "failed", "error": "no_valid_faces"})
+                        await aws.send_json(
+                            {
+                                "action": "enroll_face",
+                                "status": "failed",
+                                "error": "no_valid_faces",
+                            }
+                        )
                 except Exception:
                     pass
                 return
             success, message = enroll_face(name, good_frames)
             if success and faceid:
                 faceid.load()
-                send_enrollment_alert(f"Database reloaded - {name} ready for recognition")
+                send_enrollment_alert(
+                    f"Database reloaded - {name} ready for recognition"
+                )
             try:
-                aws = session.get('ws')
+                aws = session.get("ws")
                 if aws and not aws.closed:
-                    await aws.send_json({
-                        "action": "enroll_face",
-                        "status": "ok" if success else "failed",
-                        **({"message": message} if success else {"error": message})
-                    })
+                    await aws.send_json(
+                        {
+                            "action": "enroll_face",
+                            "status": "ok" if success else "failed",
+                            **({"message": message} if success else {"error": message}),
+                        }
+                    )
             except Exception:
                 pass
             if success:
@@ -4359,8 +4894,14 @@ async def websocket_handler(request):
                     action = data.get("action")
 
                     if action == "list_faces":
-                        if AUTH_READY and can and not can(request.get("user") or {}, "faces", "view"):
-                            await ws.send_json({"action": "list_faces", "error": "forbidden"})
+                        if (
+                            AUTH_READY
+                            and can
+                            and not can(request.get("user") or {}, "faces", "view")
+                        ):
+                            await ws.send_json(
+                                {"action": "list_faces", "error": "forbidden"}
+                            )
                             continue
                         if not FACE_DB.exists():
                             faces = []
@@ -4372,17 +4913,30 @@ async def websocket_handler(request):
                         await ws.send_json({"action": "list_faces", "faces": faces})
 
                     elif action == "delete_face":
-                        if AUTH_READY and can and not can(request.get("user") or {}, "faces", "delete"):
-                            await ws.send_json({"action": "delete_face", "error": "forbidden"})
+                        if (
+                            AUTH_READY
+                            and can
+                            and not can(request.get("user") or {}, "faces", "delete")
+                        ):
+                            await ws.send_json(
+                                {"action": "delete_face", "error": "forbidden"}
+                            )
                             continue
                         name = data.get("name")
                         if not name:
-                            await ws.send_json({"action": "delete_face", "error": "name required"})
+                            await ws.send_json(
+                                {"action": "delete_face", "error": "name required"}
+                            )
                             continue
 
                         with face_db_lock:
                             if not FACE_DB.exists():
-                                await ws.send_json({"action": "delete_face", "error": "database not found"})
+                                await ws.send_json(
+                                    {
+                                        "action": "delete_face",
+                                        "error": "database not found",
+                                    }
+                                )
                                 continue
 
                             db_data = np.load(FACE_DB, allow_pickle=True)
@@ -4394,10 +4948,17 @@ async def websocket_handler(request):
                             new_labels = labels[mask]
 
                             if len(new_labels) == len(labels):
-                                await ws.send_json({"action": "delete_face", "error": f"face '{name}' not found"})
+                                await ws.send_json(
+                                    {
+                                        "action": "delete_face",
+                                        "error": f"face '{name}' not found",
+                                    }
+                                )
                                 continue
 
-                            np.savez(FACE_DB, embeddings=new_embeddings, labels=new_labels)
+                            np.savez(
+                                FACE_DB, embeddings=new_embeddings, labels=new_labels
+                            )
 
                         if faceid:
                             faceid.load()
@@ -4405,26 +4966,42 @@ async def websocket_handler(request):
                         person_dir = RAW_DIR / name
                         if person_dir.exists():
                             import shutil
+
                             shutil.rmtree(person_dir)
 
                         send_alert("SYSTEM", f"Face '{name}' deleted from database")
-                        await ws.send_json({"action": "delete_face", "status": "deleted"})
+                        await ws.send_json(
+                            {"action": "delete_face", "status": "deleted"}
+                        )
 
                     elif action == "enroll_face":
-                        if AUTH_READY and can and not can(request.get("user") or {}, "faces", "enroll"):
-                            await ws.send_json({"action": "enroll_face", "error": "forbidden"})
+                        if (
+                            AUTH_READY
+                            and can
+                            and not can(request.get("user") or {}, "faces", "enroll")
+                        ):
+                            await ws.send_json(
+                                {"action": "enroll_face", "error": "forbidden"}
+                            )
                             continue
                         raw_name = data.get("name")
                         if not raw_name:
-                            await ws.send_json({"action": "enroll_face", "error": "name required"})
+                            await ws.send_json(
+                                {"action": "enroll_face", "error": "name required"}
+                            )
                             continue
 
                         name = normalize_name(raw_name)
                         if not name:
-                            await ws.send_json({"action": "enroll_face", "error": "name required"})
+                            await ws.send_json(
+                                {"action": "enroll_face", "error": "name required"}
+                            )
                             continue
 
-                        send_alert("SYSTEM", f"Starting face enrollment for {name} - send frames now")
+                        send_alert(
+                            "SYSTEM",
+                            f"Starting face enrollment for {name} - send frames now",
+                        )
                         ws_id = id(ws)
                         enroll_sessions[ws_id] = {
                             "name": name,
@@ -4432,10 +5009,14 @@ async def websocket_handler(request):
                             "ws": ws,
                             "processed_frames": 0,
                             "good_frames": [],
-                            "done": False
+                            "done": False,
                         }
-                        enroll_sessions[ws_id]["task"] = asyncio.create_task(_process_enrollment_session(ws_id))
-                        await ws.send_json({"action": "enroll_face", "status": "started"})
+                        enroll_sessions[ws_id]["task"] = asyncio.create_task(
+                            _process_enrollment_session(ws_id)
+                        )
+                        await ws.send_json(
+                            {"action": "enroll_face", "status": "started"}
+                        )
 
                     elif action == "enroll_frame":
                         image_data = data.get("image")
@@ -4443,20 +5024,21 @@ async def websocket_handler(request):
                             continue
                         ws_id = id(ws)
                         session = enroll_sessions.get(ws_id)
-                        if not session or session.get('done'):
+                        if not session or session.get("done"):
                             continue
 
                         try:
-                            _header, b64 = image_data.split(',', 1)
+                            _header, b64 = image_data.split(",", 1)
                             import base64
+
                             im_bytes = base64.b64decode(b64)
                             arr = np.frombuffer(im_bytes, dtype=np.uint8)
                             frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                             if frame is not None:
-                                session['frames'].append(frame)
-                                person_dir = RAW_DIR / session['name']
+                                session["frames"].append(frame)
+                                person_dir = RAW_DIR / session["name"]
                                 person_dir.mkdir(parents=True, exist_ok=True)
-                                idx = len(session['frames']) - 1
+                                idx = len(session["frames"]) - 1
                                 cv2.imwrite(str(person_dir / f"{idx}.jpg"), frame)
                         except Exception as e:
                             logger.exception("Failed to decode enroll_frame: %s", e)
@@ -4483,6 +5065,7 @@ async def websocket_handler(request):
 
     return ws
 
+
 # --------------------------------------------------
 # WEBRTC OFFER HANDLER
 # --------------------------------------------------
@@ -4501,14 +5084,20 @@ async def handle_offer(request):
         camera_id = None
     if camera_id is not None:
         try:
-            if AUTH_READY and user_can_access_camera and not await user_can_access_camera(request.get("user") or {}, camera_id):
+            if (
+                AUTH_READY
+                and user_can_access_camera
+                and not await user_can_access_camera(
+                    request.get("user") or {}, camera_id
+                )
+            ):
                 return web.Response(status=403)
         except Exception:
             return web.Response(status=403)
-    
+
     # Strictly CCTV mode
     source = "cctv"
-    
+
     sdp = params["sdp"]
     type_ = params["type"]
 
@@ -4523,14 +5112,14 @@ async def handle_offer(request):
         MODE,
     )
 
-    user_agent = request.headers.get('User-Agent', '')
+    user_agent = request.headers.get("User-Agent", "")
     print(f"📱 CLIENT DETECTED: {user_agent[:50]}...")
     logger.info(f"=== New WebRTC offer received (mode: {mode}) ===")
     logger.info(f"📱 Client User-Agent: {user_agent}")
-   
+
     # Check if iOS/Safari
-    is_ios = 'iPhone' in user_agent or 'iPad' in user_agent
-    is_safari = 'Safari' in user_agent and 'Chrome' not in user_agent
+    is_ios = "iPhone" in user_agent or "iPad" in user_agent
+    is_safari = "Safari" in user_agent and "Chrome" not in user_agent
     # expose simple global flag so frame processing can adapt for iOS clients
     try:
         global latest_client_is_ios
@@ -4542,7 +5131,7 @@ async def handle_offer(request):
         logger.info("🦁 iOS/Safari detected - applying compatibility fixes")
         # SIMPLIFY: Just log, don't modify SDP
         print("🦁 iOS/SAFARI DETECTED - Using H264 codec")
-   
+
     # ICE servers configuration (CRITICAL for phones/NAT)
     # Use a simple, compatible list for this aiortc version
     config = RTCConfiguration(
@@ -4555,7 +5144,7 @@ async def handle_offer(request):
     )
 
     logger.info(f"❄️ Using ICE configuration with {len(config.iceServers)} servers")
-   
+
     # Create PeerConnection with proper RTCConfiguration
     pc = RTCPeerConnection(configuration=config)
     # Per-connection timeout hint (used by higher-level logic if needed)
@@ -4591,45 +5180,57 @@ async def handle_offer(request):
     def on_datachannel(channel):
         logger.info(f"📩 DataChannel received from client: {channel.label}")
         pc._alert_channel = channel
-       
+
         # Store in global alert_channels
         alert_channels.add(channel)
         logger.info(f"📊 Added to alert_channels, now: {len(alert_channels)}")
-       
+
         @channel.on("open")
         def on_open():
             logger.info(f"✅✅✅ Client DataChannel OPEN: {channel.label}")
             logger.info(f"📊 alert_channels count: {len(alert_channels)}")
-           
+
             # Send immediate test alerts
             try:
                 # Test 1
-                channel.send(json.dumps({
-                    "person": "SERVER",
-                    "event": "DATA_CHANNEL_CONNECTED",
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                }))
+                channel.send(
+                    json.dumps(
+                        {
+                            "person": "SERVER",
+                            "event": "DATA_CHANNEL_CONNECTED",
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                    )
+                )
                 logger.info("✅ Test alert 1 sent")
-               
+
                 # Test 2 after 1 second
                 async def send_delayed_test():
                     await asyncio.sleep(1)
-                    if hasattr(channel, 'readyState') and channel.readyState == 'open':
-                        channel.send(json.dumps({
-                            "person": "SYSTEM",
-                            "event": "READY_FOR_DETECTIONS",
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                        }))
+                    if hasattr(channel, "readyState") and channel.readyState == "open":
+                        channel.send(
+                            json.dumps(
+                                {
+                                    "person": "SYSTEM",
+                                    "event": "READY_FOR_DETECTIONS",
+                                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                }
+                            )
+                        )
                         logger.info("✅ Test alert 2 sent")
-               
+
                 asyncio.create_task(send_delayed_test())
                 # Notify client that face enrollment can start now
-                channel.send(json.dumps({
-                    "person": "SYSTEM",
-                    "event": "READY_FOR_FACE_ENROLLMENT",
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                }))
-               
+                channel.send(
+                    json.dumps(
+                        {
+                            "person": "SYSTEM",
+                            "event": "READY_FOR_FACE_ENROLLMENT",
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                    )
+                )
+
             except Exception as e:
                 logger.error(f"Failed to send test alert: {e}")
 
@@ -4653,7 +5254,6 @@ async def handle_offer(request):
             except:
                 logger.info(f"Raw message: {msg}")
 
-
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
         logger.info(f"Connection state: {pc.connectionState}")
@@ -4669,23 +5269,25 @@ async def handle_offer(request):
                     server_camera_track = None
             except Exception:
                 pass
-           
+
             # Clean up DataChannel
             if pc._alert_channel and pc._alert_channel in alert_channels:
                 alert_channels.remove(pc._alert_channel)
-           
+
             pcs.discard(pc)
 
     async def _setup_pc():
         nonlocal server_camera_track
         # Set remote description (client's offer)
         try:
-            type_val = locals().get('type_', None)
-            print(f"📡 Offer type: {type_val}, SDP length: {len(sdp) if sdp is not None else 0}")
+            type_val = locals().get("type_", None)
+            print(
+                f"📡 Offer type: {type_val}, SDP length: {len(sdp) if sdp is not None else 0}"
+            )
         except Exception:
             print("📡 Offer debug: could not determine type_/sdp length")
         if type_val is None:
-            type_val = 'offer'
+            type_val = "offer"
         offer = RTCSessionDescription(sdp, type_val)
         await pc.setRemoteDescription(offer)
         logger.info("Remote description set")
@@ -4734,27 +5336,28 @@ async def handle_offer(request):
     except Exception as e:
         logger.error(f"Error during WebRTC setup: {e}")
         import traceback
+
         logger.error(traceback.format_exc())
-       
+
         # Clean up on error
         if pc._alert_channel and pc._alert_channel in alert_channels:
             alert_channels.remove(pc._alert_channel)
         pcs.discard(pc)
-       
+
         return web.json_response({"error": str(e)}, status=500)
 
-    return web.json_response({
-        "sdp": pc.localDescription.sdp,
-        "type": pc.localDescription.type
-    })
+    return web.json_response(
+        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+    )
+
 
 # --------------------------------------------------
 # MAIN
 # --------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--host', default=os.getenv('HOST', '0.0.0.0'))
-    parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8000')))
+    parser.add_argument("--host", default=os.getenv("HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     args, _unknown = parser.parse_known_args()
 
     middlewares = [auth_middleware] if auth_middleware else []
@@ -4765,13 +5368,7 @@ def main():
     # --------------------------------------------------
     STATIC_DIR = REPO_ROOT / "static"
 
-    app.router.add_static(
-        "/static/",
-        path=STATIC_DIR,
-        name="static",
-        show_index=False
-    )
-    
+    app.router.add_static("/static/", path=STATIC_DIR, name="static", show_index=False)
 
     async def init_db(app):
         logger.info("Initializing PostgreSQL pool...")
@@ -4781,7 +5378,7 @@ def main():
             database=os.getenv("DB_NAME", "cctv_platform"),
             host=os.getenv("DB_HOST", "127.0.0.1"),
             min_size=5,
-            max_size=20
+            max_size=20,
         )
         if set_pool:
             set_pool(app["db"])
@@ -4793,9 +5390,9 @@ def main():
 
     async def startup(app):
         logger.info("Server startup...")
-        
+
         # Start alert queue processor
-        app['alert_processor'] = asyncio.create_task(process_alert_queue())
+        app["alert_processor"] = asyncio.create_task(process_alert_queue())
         logger.info("✅ Alert queue processor started")
         try:
             _start_background_cctv_analytics()
@@ -4803,42 +5400,43 @@ def main():
             logger.warning(f"Could not start background CCTV analytics: {e}")
         # Start stats reporter
         try:
+
             async def stats_reporter():
                 INTERVAL = 5.0
                 while True:
                     await asyncio.sleep(INTERVAL)
                     try:
                         with stats_lock:
-                            dr = stats_counters.get('detection_runs', 0)
-                            of = stats_counters.get('outgoing_frames', 0)
+                            dr = stats_counters.get("detection_runs", 0)
+                            of = stats_counters.get("outgoing_frames", 0)
                             # reset counters
-                            stats_counters['detection_runs'] = 0
-                            stats_counters['outgoing_frames'] = 0
+                            stats_counters["detection_runs"] = 0
+                            stats_counters["outgoing_frames"] = 0
                         detections_per_sec = dr / INTERVAL
                         outgoing_fps = of / INTERVAL
                         perf_summary = ""
                         if PERF_STATS:
                             try:
                                 with perf_lock:
-                                    frames = perf_counters.get('frames', 0)
-                                    resize_ms = perf_counters.get('resize_ms', 0.0)
-                                    yolo_ms = perf_counters.get('yolo_ms', 0.0)
-                                    faceid_ms = perf_counters.get('faceid_ms', 0.0)
-                                    draw_ms = perf_counters.get('draw_ms', 0.0)
-                                    total_ms = perf_counters.get('total_ms', 0.0)
-                                    perf_counters['frames'] = 0
-                                    perf_counters['resize_ms'] = 0.0
-                                    perf_counters['yolo_ms'] = 0.0
-                                    perf_counters['faceid_ms'] = 0.0
-                                    perf_counters['draw_ms'] = 0.0
-                                    perf_counters['total_ms'] = 0.0
+                                    frames = perf_counters.get("frames", 0)
+                                    resize_ms = perf_counters.get("resize_ms", 0.0)
+                                    yolo_ms = perf_counters.get("yolo_ms", 0.0)
+                                    faceid_ms = perf_counters.get("faceid_ms", 0.0)
+                                    draw_ms = perf_counters.get("draw_ms", 0.0)
+                                    total_ms = perf_counters.get("total_ms", 0.0)
+                                    perf_counters["frames"] = 0
+                                    perf_counters["resize_ms"] = 0.0
+                                    perf_counters["yolo_ms"] = 0.0
+                                    perf_counters["faceid_ms"] = 0.0
+                                    perf_counters["draw_ms"] = 0.0
+                                    perf_counters["total_ms"] = 0.0
                                 if frames > 0:
                                     perf_summary = (
-                                        f", avg_ms: total={total_ms/frames:.1f} "
-                                        f"resize={resize_ms/frames:.1f} "
-                                        f"yolo={yolo_ms/frames:.1f} "
-                                        f"faceid={faceid_ms/frames:.1f} "
-                                        f"draw={draw_ms/frames:.1f}"
+                                        f", avg_ms: total={total_ms / frames:.1f} "
+                                        f"resize={resize_ms / frames:.1f} "
+                                        f"yolo={yolo_ms / frames:.1f} "
+                                        f"faceid={faceid_ms / frames:.1f} "
+                                        f"draw={draw_ms / frames:.1f}"
                                     )
                             except Exception:
                                 perf_summary = ""
@@ -4848,34 +5446,28 @@ def main():
                     except Exception as e:
                         logger.warning(f"Stats reporter error: {e}")
 
-            app['stats_reporter'] = asyncio.create_task(stats_reporter())
+            app["stats_reporter"] = asyncio.create_task(stats_reporter())
             logger.info("✅ Stats reporter started")
         except Exception as e:
             logger.warning(f"Failed to start stats reporter: {e}")
 
-    
-
-        
-
-
     async def logout(request):
         return web.json_response({"message": "Logged out"})
 
-   
     async def cleanup(app):
         logger.info("Server cleanup...")
         # Cancel alert processor
-        if 'alert_processor' in app:
-            app['alert_processor'].cancel()
+        if "alert_processor" in app:
+            app["alert_processor"].cancel()
             try:
-                await app['alert_processor']
+                await app["alert_processor"]
             except asyncio.CancelledError:
                 pass
         # Cancel stats reporter
-        if 'stats_reporter' in app:
-            app['stats_reporter'].cancel()
+        if "stats_reporter" in app:
+            app["stats_reporter"].cancel()
             try:
-                await app['stats_reporter']
+                await app["stats_reporter"]
             except asyncio.CancelledError:
                 pass
         try:
@@ -4883,14 +5475,13 @@ def main():
         except Exception:
             pass
         logger.info("Cleanup completed")
-   
-    app.on_startup.append(init_db)     
+
+    app.on_startup.append(init_db)
     app.on_startup.append(startup)
 
-    app.on_cleanup.append(close_db)   
+    app.on_cleanup.append(close_db)
     app.on_cleanup.append(cleanup)
 
-   
     app.router.add_get("/", index)
     app.router.add_get("/super-admin/dashboard", super_admin_dashboard_page)
     app.router.add_get("/super-admin/dashboard/{tail:.*}", super_admin_dashboard_page)
@@ -4928,13 +5519,11 @@ def main():
         app.router.add_static("/event-clips/", str(EVENT_CLIP_DIR), show_index=True)
     except Exception as e:
         logger.warning(f"Event clip static route disabled: {e}")
-    
 
-
-
-   
     sslctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    sslctx.load_cert_chain(REPO_ROOT / "certs" / "cert.pem", REPO_ROOT / "certs" / "key.pem")
+    sslctx.load_cert_chain(
+        REPO_ROOT / "certs" / "cert.pem", REPO_ROOT / "certs" / "key.pem"
+    )
 
     logger.info("=== Starting WebRTC YOLO Server ===")
     logger.info(f"WEB ROI: {web_roi}")
@@ -4944,6 +5533,7 @@ def main():
     print("📱 For iPhone: Open Safari to https://YOUR-IP:8000")
 
     web.run_app(app, host=args.host, port=args.port, ssl_context=sslctx)
+
 
 if __name__ == "__main__":
     main()

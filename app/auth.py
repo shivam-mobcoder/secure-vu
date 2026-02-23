@@ -35,6 +35,7 @@ def _issue_token(user: dict) -> str:
         return token.decode("utf-8")
     return token
 
+
 async def create_user(email, password, role, client_id):
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
@@ -45,6 +46,7 @@ async def create_user(email, password, role, client_id):
         """,
         (email, pw_hash, role, client_id),
     )
+
 
 async def login(request):
     try:
@@ -65,7 +67,9 @@ async def login(request):
         return web.Response(status=401)
 
     token = _issue_token(user)
-    return web.json_response({"token": token, "token_type": "Bearer", "expires_in": 86400})
+    return web.json_response(
+        {"token": token, "token_type": "Bearer", "expires_in": 86400}
+    )
 
 
 async def signup(request):
@@ -95,20 +99,24 @@ async def signup(request):
     except Exception:
         return web.json_response({"error": "invalid_client_id"}, status=400)
 
-    await create_user(email=email, password=password, role=role, client_id=parsed_client_id)
+    await create_user(
+        email=email, password=password, role=role, client_id=parsed_client_id
+    )
     user = await db_get_user_by_email(email)
     if not user:
         return web.json_response({"error": "user_create_failed"}, status=500)
 
     token = _issue_token(user)
-    return web.json_response({
-        "token": token,
-        "token_type": "Bearer",
-        "expires_in": 86400,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "role": user["role"],
-            "client_id": user.get("client_id"),
-        },
-    })
+    return web.json_response(
+        {
+            "token": token,
+            "token_type": "Bearer",
+            "expires_in": 86400,
+            "user": {
+                "id": user["id"],
+                "email": user["email"],
+                "role": user["role"],
+                "client_id": user.get("client_id"),
+            },
+        }
+    )

@@ -2,6 +2,7 @@ import jwt
 import time
 from aiohttp import web
 from auth import JWT_SECRET, JWT_ALGO
+
 try:
     from db import db_get_user_by_id  # type: ignore
 except Exception:
@@ -33,7 +34,9 @@ async def auth_middleware(request, handler):
     if request.method == "OPTIONS":
         return web.Response(status=204)
 
-    if request.path in PUBLIC_PATHS or any(request.path.startswith(p) for p in PUBLIC_PREFIXES):
+    if request.path in PUBLIC_PATHS or any(
+        request.path.startswith(p) for p in PUBLIC_PREFIXES
+    ):
         return await handler(request)
 
     # Allow public access to enrollment links, but keep /enroll/create protected.
@@ -63,7 +66,9 @@ async def auth_middleware(request, handler):
     if issued_at < SERVER_START_TS:
         return web.Response(status=401)
 
-    if db_get_user_by_id and (not payload.get("role") or payload.get("client_id") is None):
+    if db_get_user_by_id and (
+        not payload.get("role") or payload.get("client_id") is None
+    ):
         try:
             user = await db_get_user_by_id(payload.get("user_id"))
             if user:

@@ -19,7 +19,9 @@ class FaceIDManager:
 
     def load(self) -> None:
         if not self.db_path.exists():
-            print(f"[FACE] No face_db.npz found at {self.db_path}. Face-ID will be disabled.")
+            print(
+                f"[FACE] No face_db.npz found at {self.db_path}. Face-ID will be disabled."
+            )
             return
         # labels are stored as object dtype; allow_pickle needed to load safely
         # Some .npz files saved with newer NumPy versions may reference
@@ -39,7 +41,9 @@ class FaceIDManager:
         try:
             self.embeddings = data["embeddings"]
             self.labels = data["labels"]
-            self.embeddings[:] = self.embeddings / (np.linalg.norm(self.embeddings, axis=1, keepdims=True) + 1e-8)
+            self.embeddings[:] = self.embeddings / (
+                np.linalg.norm(self.embeddings, axis=1, keepdims=True) + 1e-8
+            )
         except Exception as e:
             print(f"[FACE] Failed to load face DB ({e}). Face-ID will be disabled.")
             return
@@ -51,23 +55,36 @@ class FaceIDManager:
             try:
                 import onnxruntime as ort
 
-
-                ort_has_cuda_ep = "CUDAExecutionProvider" in (ort.get_available_providers() or [])
+                ort_has_cuda_ep = "CUDAExecutionProvider" in (
+                    ort.get_available_providers() or []
+                )
             except Exception:
                 ort_has_cuda_ep = False
 
             prefer_cuda = (self.ctx_id >= 0) and ort_has_cuda_ep
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if prefer_cuda else ["CPUExecutionProvider"]
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                if prefer_cuda
+                else ["CPUExecutionProvider"]
+            )
             try:
-                self.app = FaceAnalysis(name="buffalo_l", root=str(root), providers=providers)
+                self.app = FaceAnalysis(
+                    name="buffalo_l", root=str(root), providers=providers
+                )
             except Exception as e:
                 # If CUDA provider fails (common on systems without a CUDA device), retry on CPU.
-                self.app = FaceAnalysis(name="buffalo_l", root=str(root), providers=["CPUExecutionProvider"])
+                self.app = FaceAnalysis(
+                    name="buffalo_l", root=str(root), providers=["CPUExecutionProvider"]
+                )
                 self.ctx_id = -1
             self.app.prepare(ctx_id=self.ctx_id, det_size=(320, 320))
-            print(f"[FACE] Loaded database with identities: {sorted(set(self.labels.tolist()))}")
+            print(
+                f"[FACE] Loaded database with identities: {sorted(set(self.labels.tolist()))}"
+            )
         except Exception as e:
-            print(f"[FACE] Failed to initialize FaceAnalysis: {e}. Face-ID will be disabled.")
+            print(
+                f"[FACE] Failed to initialize FaceAnalysis: {e}. Face-ID will be disabled."
+            )
             self.app = None
             self.embeddings = None
             self.labels = None
@@ -101,6 +118,7 @@ class FaceIDManager:
         # Full-res (1280×720) is very expensive; 640-wide is 3-4× faster
         # and still accurate for face detection.
         import cv2 as _cv2
+
         h, w = frame.shape[:2]
         MAX_FACE_W = 640
         if w > MAX_FACE_W:
@@ -130,8 +148,10 @@ class FaceIDManager:
         def _iou(a, b):
             ax1, ay1, ax2, ay2 = a
             bx1, by1, bx2, by2 = b
-            ix1 = max(ax1, bx1); iy1 = max(ay1, by1)
-            ix2 = min(ax2, bx2); iy2 = min(ay2, by2)
+            ix1 = max(ax1, bx1)
+            iy1 = max(ay1, by1)
+            ix2 = min(ax2, bx2)
+            iy2 = min(ay2, by2)
             inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
             area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
             area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
@@ -143,8 +163,10 @@ class FaceIDManager:
         results = []
         for box in boxes:
             bx1, by1, bx2, by2 = (
-                max(0, int(box[0])), max(0, int(box[1])),
-                min(w - 1, int(box[2])), min(h - 1, int(box[3])),
+                max(0, int(box[0])),
+                max(0, int(box[1])),
+                min(w - 1, int(box[2])),
+                min(h - 1, int(box[3])),
             )
             if bx2 <= bx1 or by2 <= by1:
                 results.append(default)
@@ -190,11 +212,11 @@ class FaceIDManager:
 
         return results
 
-    def recognize_with_embedding(self, frame, box: Tuple[int, int, int, int]) -> Tuple[str, float, Optional[np.ndarray]]:
-        """Single-box recognition — wraps recognize_batch for backward compat."""
+    def recognize_with_embedding(
+        self, frame, box: Tuple[int, int, int, int]
+    ) -> Tuple[str, float, Optional[np.ndarray]]:
+        # Single-box recognition — wraps recognize_batch for backward compat.
         results = self.recognize_batch(frame, [box])
+        if not results:
+            return "Unknown", 0.0, None
         return results[0]
-
-    def recognize(self, frame, box: Tuple[int, int, int, int]) -> Tuple[str, float]:
-        name, score, _emb = self.recognize_with_embedding(frame, box)
-        return name, score

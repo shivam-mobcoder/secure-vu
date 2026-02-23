@@ -20,6 +20,7 @@ def _normalize_role(role) -> str:
     raw = raw.replace("-", "_").replace(" ", "_")
     return ROLE_ALIASES.get(raw, raw)
 
+
 ROLE_PERMISSIONS = {
     "super_admin": {
         "clients": {"view"},
@@ -59,6 +60,7 @@ def can(user, resource: str, action: str) -> bool:
         return False
     return "*" in allowed or action in allowed
 
+
 def require_admin(handler):
     @wraps(handler)
     async def wrapper(request):
@@ -66,7 +68,9 @@ def require_admin(handler):
         if role not in ("admin", "super_admin"):
             return web.Response(status=403)
         return await handler(request)
+
     return wrapper
+
 
 async def user_can_access_camera(user, camera_id):
     role = _normalize_role(user.get("role"))
