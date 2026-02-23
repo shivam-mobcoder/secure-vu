@@ -145,14 +145,8 @@ ENROLLMENT_ACTIVE = False
 # Face enrollment imports
 from insightface.app import FaceAnalysis
 
-SERVER_CAMERA_INDEX = int(os.getenv("SERVER_CAMERA", "0"))
-print(f"📷 Using SERVER_CAMERA_INDEX={SERVER_CAMERA_INDEX}")
-
-# Mode switch between USB device and CCTV feed
-MODE = os.getenv("MODE", "device").strip().lower()  # device | cctv
-if MODE not in ("device", "cctv"):
-    print(f"⚠️ Unknown MODE={MODE!r}; falling back to 'device'")
-    MODE = "device"
+# Always run in CCTV mode; local USB device support removed.
+MODE = "cctv"
 print(f"🔁 Running in {MODE.upper()} mode")
 
 # RTSP may be configured regardless of MODE so the UI can switch sources
@@ -252,12 +246,6 @@ def _bool_param(val, default: bool = True) -> bool:
         return False
     return default
 
-# For CCTV/Test mode: try multiple indices (helps on systems where /dev/video0 is in use
-# or where the camera is not index 0). Example: SERVER_CAMERA_CANDIDATES="0,1,2".
-SERVER_CAMERA_CANDIDATES = _parse_int_list_env(
-    "SERVER_CAMERA_CANDIDATES",
-    default=str(SERVER_CAMERA_INDEX)
-)
 SERVER_CAMERA_FPS = int(os.getenv("SERVER_CAMERA_FPS", "15"))
 GRID_CAMERA_FPS = int(os.getenv("GRID_CAMERA_FPS", "12"))
 SERVER_CAMERA_WIDTH = int(os.getenv("SERVER_CAMERA_WIDTH", "1280"))
@@ -277,7 +265,7 @@ alert_queue = Queue()
 stats_lock = threading.Lock()
 stats_counters = {
     'detection_runs': 0,  # how many times process_frame actually ran YOLO
-    'outgoing_frames': 0,  # how many frames sent by OutgoingProcessedTrack
+    'outgoing_frames': 0,
 }
 perf_lock = threading.Lock()
 perf_counters = {
@@ -540,7 +528,6 @@ def _hybrid_face_motion_score(face_sim: float, motion_sim: float) -> float:
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent
 sys.path.append(str(REPO_ROOT))
-sys.path.append(str(REPO_ROOT / "yolo_51" / "code"))
 
 try:
     from app.faceid import FaceIDManager
@@ -975,7 +962,6 @@ roi_updated_at = 0.0
 # Global flag set per-offer to indicate client is iOS/Safari
 latest_client_is_ios = False
 # Global process lock (created at startup) to ensure only one client is processed at a time
-global_process_lock = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webrtc-yolo")
@@ -3348,123 +3334,10 @@ async def processing_loop(latest_holder, stop_event):
 
 
 
-async def ingest_incoming_track_latest(track, latest_holder, stop_event: asyncio.Event):
-    """Read frames as fast as they arrive and keep only the latest.
-
-    Critical for low-latency: never block receiving on inference.
-    """
-    while not stop_event.is_set():
-        frame = await track.recv()
-        img = frame.to_ndarray(format="bgr24")
-        # Cap very high resolutions to avoid CPU/GPU overload.
-        h, w = img.shape[:2]
-        max_edge = max(h, w)
-        if max_edge > 1080:
-            scale = 1080 / max_edge
-            img = cv2.resize(img, (int(w * scale), int(h * scale)))
-        latest_holder["frame"] = img
-        latest_holder["ts"] = monotonic()
-
-
-async def process_latest_loop(latest_holder, processed_queue, stop_event: asyncio.Event, camera_id=None):
-    """Run inference on the latest available frame at a target rate.
-
-    If inference is slow, this naturally drops frames instead of building delay.
-    """
-    loop = asyncio.get_event_loop()
-    fps = max(1, int(PROCESSING_FPS))
-    next_t = monotonic()
-    while not stop_event.is_set():
-        now = monotonic()
-        # maintain a target processing cadence, but don't sleep if we're behind
-        if now < next_t:
-            await asyncio.sleep(next_t - now)
-        next_t = max(next_t + (1.0 / fps), monotonic())
-
-        img = latest_holder.get("frame")
-        if img is None:
-            continue
-        processed = await loop.run_in_executor(None, process_frame, img, None, False, camera_id)
-        processed_queue.append(processed)
 
 # --------------------------------------------------
 # OUTGOING PROCESSED TRACK (optimized)
 # --------------------------------------------------
-class OutgoingProcessedTrack(VideoStreamTrack):
-    def __init__(self, queue, fps=OUTGOING_TRACK_FPS, out_size=OUTGOING_TRACK_SIZE):
-        super().__init__()
-        self.queue = queue
-        self.out_w = int(out_size[0])
-        self.out_h = int(out_size[1])
-        # Use a stable buffer
-        self.last = np.zeros((self.out_h, self.out_w, 3), np.uint8)
-        # Monotonic PTS for Android decoder stability
-        self.pts = 0
-        self.fps = fps
-        self.time_base = Fraction(1, fps)
-        self._next_send_t = monotonic()
-
-    async def recv(self):
-        # Pace output, but do not add extra latency if we are behind schedule.
-        now = monotonic()
-        if now < self._next_send_t:
-            await asyncio.sleep(self._next_send_t - now)
-        self._next_send_t = max(self._next_send_t + (1.0 / max(1, self.fps)), monotonic())
-
-        if len(self.queue):
-            self.last = self.queue[-1]
-
-        # Force stable output size
-        try:
-            frame = cv2.resize(self.last, (self.out_w, self.out_h))
-        except Exception:
-            frame = self.last
-
-        # Send BGR frames (YUV-friendly) so H264 encoder/decoder on iOS works
-        vf = VideoFrame.from_ndarray(frame, format="bgr24")
-
-        # Provide monotonic pts/time_base — required by Android encoder
-        try:
-            self.pts += 1
-            vf.pts = self.pts
-            vf.time_base = self.time_base
-        except Exception:
-            pass
-
-        # increment outgoing frame counter
-        try:
-            with stats_lock:
-                stats_counters['outgoing_frames'] += 1
-        except Exception:
-            pass
-
-        return vf
-
-# --------------------------------------------------
-# SERVER CAMERA TRACK — TEST MODE
-# --------------------------------------------------
-class ServerCameraTrack(VideoStreamTrack):
-    """Legacy per-client camera track (kept for compatibility)."""
-    def __init__(self, fps=30):
-        super().__init__()
-        self.cap = cv2.VideoCapture(SERVER_CAMERA_INDEX)
-        self.i = 0
-        self.fps = fps
-
-    async def recv(self):
-        await asyncio.sleep(1 / max(1, int(self.fps)))
-        ok, frame = self.cap.read()
-        if not ok:
-            frame = np.zeros((480, 640, 3), np.uint8)
-
-        processed = process_frame(frame, camera_id=SERVER_CAMERA_INDEX)
-        vf = VideoFrame.from_ndarray(processed, format="bgr24")
-
-        self.i += 1
-        vf.pts = self.i
-        vf.time_base = Fraction(1, self.fps)
-        return vf
-
 
 class SharedServerCamera:
     """Shared server camera capture + processing loop.
@@ -3472,18 +3345,15 @@ class SharedServerCamera:
     Source 'cctv' uses RTSP only. Source 'device' uses local indices only.
     """
 
-    def __init__(self, source: str, rtsp_url: str | None = None, camera_id: int | None = None, process: bool = True):
+    def __init__(self, camera_id: int | None = None, process: bool = True):
         self._lock = threading.Lock()
         self._clients = 0
         self._thread = None
         self._stop_evt = threading.Event()
         self._cap = None
         self._latest = np.zeros((SERVER_CAMERA_HEIGHT, SERVER_CAMERA_WIDTH, 3), np.uint8)
-        self._opened_index = None
-        self._last_ok = 0.0
-        self._source = (source or "").strip().lower()
-        self._rtsp_url = (rtsp_url or "").strip() or None
         self._camera_id = camera_id
+        self._rtsp_url = _get_rtsp_url(camera_id)
         self._last_open_fail = 0.0
         self._process = bool(process)
         use_pyav_env = os.getenv("RTSP_USE_PYAV", "0").strip() == "1"
@@ -3571,84 +3441,6 @@ class SharedServerCamera:
                 return None
             return cap if cap.isOpened() else None
 
-        if self._source == "cctv":
-            if not self._rtsp_url:
-                logger.warning(
-                    f"❌ CCTV source requested but RTSP URL is not set for camera {self._camera_id}"
-                )
-                return False
-            # Use raw RTSP URL; transport tuning is handled via OPENCV_FFMPEG_CAPTURE_OPTIONS
-            # to avoid cameras/NVRs that reject extra query params.
-            rtsp_opts = f"{self._rtsp_url}"
-            if self._use_pyav:
-                try:
-                    self._av_container = av.open(
-                        rtsp_opts,
-                        options={"rtsp_transport": "tcp", "stimeout": "5000000"}
-                    )
-                    self._av_stream = next((s for s in self._av_container.streams if s.type == "video"), None)
-                    if self._av_stream is None:
-                        self._release_cap()
-                        return False
-                    self._av_stream.thread_type = "AUTO"
-                    self._av_frames = self._av_container.decode(self._av_stream)
-                    self._opened_index = "PYAV"
-                    logger.info(f"✅ CCTV RTSP opened via PyAV (camera {self._camera_id})")
-                    return True
-                except Exception as e:
-                    logger.warning(f"❌ PyAV RTSP open failed (camera {self._camera_id}): {e}")
-                    self._release_cap()
-                    self._last_open_fail = time.time()
-                    return False
-            cap = _open_rtsp(rtsp_opts)
-            if cap is None:
-                self._last_open_fail = time.time()
-                return False
-            
-            try:
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                cap.set(cv2.CAP_PROP_FPS, 30)
-            except Exception:
-                pass
-            ok, _frame = cap.read()
-            if ok:
-                for _ in range(5):
-                    cap.grab()
-                self._cap = cap
-                self._opened_index = "RTSP"
-                logger.info(f"✅ CCTV RTSP opened (camera {self._camera_id})")
-                return True
-            cap.release()
-
-            logger.warning(f"❌ Could not open CCTV RTSP stream (camera {self._camera_id})")
-            self._last_open_fail = time.time()
-            return False
-
-        # device source: local indices only
-
-        for idx in SERVER_CAMERA_CANDIDATES:
-            cap = cv2.VideoCapture(idx)
-            try:
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(SERVER_CAMERA_WIDTH))
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(SERVER_CAMERA_HEIGHT))
-                cap.set(cv2.CAP_PROP_FPS, float(SERVER_CAMERA_FPS))
-            except Exception:
-                pass
-            ok, _frame = cap.read()
-            if ok:
-                self._cap = cap
-                self._opened_index = idx
-                logger.info(f"✅ Shared device camera opened at index {idx}")
-                return True
-            try:
-                cap.release()
-            except Exception:
-                pass
-        logger.warning(
-            f"❌ Could not open any server camera index from {SERVER_CAMERA_CANDIDATES}. "
-            f"Set SERVER_CAMERA_CANDIDATES or SERVER_CAMERA env vars."
-        )
         return False
 
     def _make_cap(self):
@@ -3676,42 +3468,21 @@ class SharedServerCamera:
                 return None
             return cap if cap.isOpened() else None
 
-        if self._source == "cctv":
-            if not self._rtsp_url:
-                return None
-            cap = _open_rtsp(self._rtsp_url)
-            if cap is None:
-                return None
-            ok, _ = cap.read()
-            if ok:
-                for _ in range(3):
-                    cap.grab()
-                logger.info(f"\u2705 RTSP opened (camera {self._camera_id})")
-                return cap
-            try:
-                cap.release()
-            except Exception:
-                pass
+        if not self._rtsp_url:
             return None
-
-        # device source
-        for idx in SERVER_CAMERA_CANDIDATES:
-            cap = cv2.VideoCapture(idx)
-            try:
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(SERVER_CAMERA_WIDTH))
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(SERVER_CAMERA_HEIGHT))
-                cap.set(cv2.CAP_PROP_FPS, float(SERVER_CAMERA_FPS))
-            except Exception:
-                pass
-            ok, _ = cap.read()
-            if ok:
-                logger.info(f"\u2705 Device camera opened at index {idx}")
-                return cap
-            try:
-                cap.release()
-            except Exception:
-                pass
+        cap = _open_rtsp(self._rtsp_url)
+        if cap is None:
+            return None
+        ok, _ = cap.read()
+        if ok:
+            for _ in range(3):
+                cap.grab()
+            logger.info(f"✅ RTSP opened (camera {self._camera_id})")
+            return cap
+        try:
+            cap.release()
+        except Exception:
+            pass
         return None
 
     def _capture_worker(self, cap_stop: threading.Event) -> None:
@@ -3859,7 +3630,7 @@ def _get_shared_cctv_camera(camera_id: int | None, process: bool = True) -> Shar
     with _shared_cctv_lock:
         cam = _shared_server_cameras.get(key)
         if cam is None:
-            cam = SharedServerCamera(source="cctv", rtsp_url=rtsp_url, camera_id=cam_id, process=process)
+            cam = SharedServerCamera(camera_id=cam_id, process=process)
             _shared_server_cameras[key] = cam
         return cam
 
@@ -3909,22 +3680,18 @@ def _stop_background_cctv_analytics() -> None:
 
 
 class SharedServerCameraTrack(VideoStreamTrack):
-    def __init__(self, fps=SERVER_CAMERA_FPS, source: str = "cctv", camera_id: int | None = None, process: bool = True):
+    def __init__(self, fps=SERVER_CAMERA_FPS, camera_id: int | None = None, process: bool = True):
         super().__init__()
         self.fps = int(fps)
         self.i = 0
         self.time_base = Fraction(1, max(1, self.fps))
         self._closed = False
-        self._source = (source or "").strip().lower() or "cctv"
-        if self._source != "cctv":
-            # currently only CCTV uses the shared track
-            self._source = "cctv"
         self._camera_id = camera_id
         self._process = bool(process)
         self._shared_camera = _get_shared_cctv_camera(self._camera_id, process=self._process)
         self._shared_camera.add_client()
         # Tracks the ideal next-send wall-clock time so we don't drift when
-        # the event loop is momentarily busy — same pattern as OutgoingProcessedTrack.
+        # focus/grid track.
         self._next_send_t = monotonic()
 
     async def recv(self):
@@ -4725,12 +4492,9 @@ async def handle_offer(request):
     if AUTH_READY and can and not can(request.get("user") or {}, "webrtc", "connect"):
         return web.Response(status=403)
     params = await request.json()
-    mode = params.get("mode", "pm")
-    source = (params.get("source") or "").strip().lower()
+    mode = params.get("mode", "test")
     analysis = _bool_param(params.get("analysis"), default=True)
-    camera_id = params.get("cameraId")
-    if camera_id is None:
-        camera_id = params.get("camera_id")
+    camera_id = params.get("cameraId") or params.get("camera_id")
     try:
         camera_id = int(camera_id) if camera_id is not None else None
     except Exception:
@@ -4741,23 +4505,22 @@ async def handle_offer(request):
                 return web.Response(status=403)
         except Exception:
             return web.Response(status=403)
-    if source not in ("device", "cctv"):
-        # Backward compatibility: default to CCTV for test/grid, else MODE.
-        source = "cctv" if mode in ("test", "grid") else MODE
-    if mode in ("test", "grid") and source != "cctv":
-        # Force CCTV for grid/test to ensure RTSP feed is used.
-        source = "cctv"
+    
+    # Strictly CCTV mode
+    source = "cctv"
+    
     sdp = params["sdp"]
     type_ = params["type"]
 
-    # Log source selection inputs (helps debug 'device shows CCTV' reports)
+    server_camera_track = None
+
+    # Log source selection inputs
     logger.info(
-        "Offer received: request.mode=%s, request.source=%s, request.camera_id=%s, MODE=%s, SERVER_CAMERA_INDEX=%s",
+        "Offer received: request.mode=%s, request.source=%s, request.camera_id=%s, MODE=%s",
         mode,
         source,
         camera_id,
         MODE,
-        SERVER_CAMERA_INDEX,
     )
 
     user_agent = request.headers.get('User-Agent', '')
@@ -4890,53 +4653,13 @@ async def handle_offer(request):
             except:
                 logger.info(f"Raw message: {msg}")
 
-    processed_queue = deque(maxlen=1)
-    consumer_task = None
-    ingest_task = None
-    process_task = None
-    stop_evt = asyncio.Event()
-    latest_incoming = {"frame": None, "ts": 0.0}
-    server_camera_track = None
-
-    @pc.on("track")
-    async def on_track(track):
-        nonlocal consumer_task, ingest_task, process_task
-        logger.info(f"Track received: {track.kind}")
-        if track.kind == "video":
-            logger.info("Starting video processing...")
-            # Low-latency pipeline: keep only latest incoming frame and process on a separate loop.
-            ingest_task = asyncio.create_task(ingest_incoming_track_latest(track, latest_incoming, stop_evt))
-            process_task = asyncio.create_task(process_latest_loop(latest_incoming, processed_queue, stop_evt, camera_id=camera_id))
 
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
         logger.info(f"Connection state: {pc.connectionState}")
         if pc.connectionState in ("failed", "closed", "disconnected"):
             logger.info("Cleaning up connection...")
-            try:
-                stop_evt.set()
-            except Exception:
-                pass
-            if consumer_task:
-                consumer_task.cancel()
-                try:
-                    await consumer_task
-                except asyncio.CancelledError:
-                    pass
-
-            if ingest_task:
-                ingest_task.cancel()
-                try:
-                    await ingest_task
-                except asyncio.CancelledError:
-                    pass
-
-            if process_task:
-                process_task.cancel()
-                try:
-                    await process_task
-                except asyncio.CancelledError:
-                    pass
+            # pass
 
             # Stop server camera track (decrements shared camera refcount)
             try:
@@ -4977,28 +4700,18 @@ async def handle_offer(request):
         else:
             logger.warning("❌ Client SDP does NOT include DataChannel")
 
-        # Add appropriate outgoing track (selected per-offer; no restart needed)
-        if source == "cctv":
-            logger.info(
-                "📺 Using CCTV SharedServerCameraTrack (RTSP), camera_id=%s, analysis=%s",
-                camera_id,
-                analysis,
-            )
-            server_camera_track = SharedServerCameraTrack(
-                fps=SERVER_CAMERA_FPS,
-                source="cctv",
-                camera_id=camera_id,
-                process=analysis,
-            )
-            pc.addTrack(server_camera_track)
-        else:
-            logger.info("📷 Device source: sending processed client video (bounding boxes)")
-            server_camera_track = OutgoingProcessedTrack(
-                processed_queue,
-                fps=OUTGOING_TRACK_FPS,
-                out_size=OUTGOING_TRACK_SIZE,
-            )
-            pc.addTrack(server_camera_track)
+        # Add CCTV SharedServerCameraTrack (RTSP)
+        logger.info(
+            "📺 Using CCTV SharedServerCameraTrack (RTSP), camera_id=%s, analysis=%s",
+            camera_id,
+            analysis,
+        )
+        server_camera_track = SharedServerCameraTrack(
+            fps=SERVER_CAMERA_FPS,
+            camera_id=camera_id,
+            process=analysis,
+        )
+        pc.addTrack(server_camera_track)
 
         # Prefer H264 for Safari/iOS clients to avoid black-screen on some devices
         try:
@@ -5013,19 +4726,7 @@ async def handle_offer(request):
         print(f"✅ WebRTC connection established with {user_agent[:30]}")
 
     try:
-        global global_process_lock
-        if global_process_lock is None:
-            global_process_lock = asyncio.Lock()
-
-        if mode in ("test", "grid"):
-            # Allow multiple CCTV viewers concurrently.
-            await _setup_pc()
-        else:
-            # Serialize heavy PM mode processing.
-            # async with global_process_lock:
-                print("🔐 Acquired process lock - processing this client")
-                await _setup_pc()
-            # print("🔓 Released process lock - server ready for next client")
+        await _setup_pc()
 
         # Allow connection to stabilize without blocking other offers.
         # await asyncio.sleep(0.25)
@@ -5100,13 +4801,6 @@ def main():
             _start_background_cctv_analytics()
         except Exception as e:
             logger.warning(f"Could not start background CCTV analytics: {e}")
-        # Initialize global processing lock to serialize heavy AI work
-        try:
-            global global_process_lock
-            global_process_lock = asyncio.Lock()
-            logger.info("✅ Global process lock initialized")
-        except Exception as e:
-            logger.warning(f"Could not initialize global process lock: {e}")
         # Start stats reporter
         try:
             async def stats_reporter():

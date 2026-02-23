@@ -30,7 +30,10 @@ def _issue_token(user: dict) -> str:
         "iat": now,
         "exp": now + 86400,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+    if isinstance(token, bytes):
+        return token.decode("utf-8")
+    return token
 
 async def create_user(email, password, role, client_id):
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()

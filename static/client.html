@@ -44,7 +44,6 @@
   </div>
 
   <div class="btn-row" id="controlRow">
-    <button id="pmBtn">Start Device Mode</button>
     <button id="testBtn">Start CCTV Mode</button>
 
     <label for="cctvSelect" style="align-self:center; color:#ccc;">CCTV:</label>
@@ -55,27 +54,6 @@
       <option value="4">Camera 4</option>
     </select>
     <!-- CCTV local-camera checkbox removed to restore stable defaults -->
-    <button id="addFaceBtn">Add Face</button>
-    <button id="viewDatabaseBtn" onclick="viewDatabase()">View Database</button>
-    <button onclick="createEnrollLink()" class="invite-btn">
-      Invite Person
-    </button>
-  </div>
-
-  <div id="inviteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999">
-    <div
-      style="max-width:420px;margin:10% auto;background:#0b1224;padding:24px;border-radius:16px;border:1px solid rgba(255,255,255,.2)">
-      <h3 style="margin-top:0">Enrollment Link</h3>
-
-      <input id="inviteLink" readonly
-        style="width:100%;padding:10px;border-radius:8px;border:1px solid #333;background:#050c1a;color:white">
-
-      <div style="display:flex;gap:10px;margin-top:14px">
-        <button onclick="openInvite()">Open</button>
-        <button onclick="copyInvite()">Copy</button>
-        <button onclick="closeInvite()">Close</button>
-      </div>
-    </div>
   </div>
   <div class="camera-grid" id="cameraGrid" aria-label="CCTV camera selector">
     <div class="camera-tile" data-camera-id="1" role="button" tabindex="0">
@@ -270,48 +248,7 @@
   <canvas id="roiDisplayCanvas"></canvas>
 
   <div class="below-video-row">
-    <div id="faceEnrollment">
-      <div class="enrollment-card">
 
-        <h3 style="color:#4cd137; margin-bottom:16px;">Add New Face</h3>
-
-        <input type="text" id="faceNameInput" placeholder="Enter name" style="
-        padding:10px;
-        width:100%;
-        margin-bottom:14px;
-        border:1px solid #333;
-        border-radius:5px;
-        background:#333;
-        color:#fff;
-      ">
-
-        <div id="enrollmentStatus" style="margin-bottom:14px; color:#ccc; font-size:14px;">
-          Position your face in the camera and click Start Enrollment
-        </div>
-
-        <div class="enrollment-progress">
-          <div class="progress-ring" role="img" aria-label="Enrollment progress">
-            <svg viewBox="0 0 36 36">
-              <circle class="progress-ring__bg" cx="18" cy="18" r="17"></circle>
-              <circle class="progress-ring__circle" id="enrollmentProgressCircle" cx="18" cy="18" r="17"></circle>
-            </svg>
-            <div class="progress-ring__text" id="enrollmentProgressText">0 / 12</div>
-          </div>
-          <div class="guidance-panel" id="serverGuidance" aria-live="polite">
-            Waiting for guidance...
-          </div>
-          <div id="cameraRetryTimer" class="camera-retry"></div>
-        </div>
-
-        <div style="display:flex; gap:10px; justify-content:center;">
-          <button id="startEnrollmentBtn">Start Enrollment</button>
-          <button onclick="cancelEnrollment()" style="background:#333;color:#fff;">
-            Cancel
-          </button>
-        </div>
-
-      </div>
-    </div>
 
     <div id="rulesPanel" style="display:none;">
       <div class="rules-card">
@@ -690,13 +627,9 @@
     const controlRowEl = document.getElementById('controlRow');
     const rulesPanelEl = document.getElementById('rulesPanel');
     const focusRulesPanelEl = document.getElementById('focusRulesPanel');
-    const faceEnrollmentEl = document.getElementById('faceEnrollment');
     const editRoiBtn = document.getElementById('editROI');
     const saveRoiBtn = document.getElementById('saveROI');
     const cancelRoiBtn = document.getElementById('cancelROI');
-    const addFaceBtn = document.getElementById('addFaceBtn');
-    const inviteBtn = document.querySelector('.invite-btn');
-    const viewDatabaseBtn = document.getElementById('viewDatabaseBtn');
 
     function normalizeRole(role) {
       const raw = (role || '').toString().trim().toLowerCase().replace(/[-\s]+/g, '_');
@@ -774,22 +707,6 @@
         btn.disabled = !caps.canManageRules;
       });
 
-      if (faceEnrollmentEl) {
-        faceEnrollmentEl.style.display = _enrollmentOpen && caps.canManageFaces ? 'flex' : 'none';
-      }
-      if (addFaceBtn) {
-        addFaceBtn.style.display = caps.canManageFaces ? '' : 'none';
-        addFaceBtn.disabled = !caps.canManageFaces;
-      }
-      if (viewDatabaseBtn) {
-        viewDatabaseBtn.style.display = caps.canViewFaces ? '' : 'none';
-      }
-      if (startEnrollmentBtn) {
-        startEnrollmentBtn.disabled = !caps.canManageFaces;
-      }
-      if (inviteBtn) {
-        inviteBtn.style.display = caps.canManageFaces ? '' : 'none';
-      }
     }
 
     async function loadSuperAdminClients() {
@@ -939,7 +856,6 @@
     let suppressCameraErrors = false;
     let enrollmentStreamRetryActive = false;
     let cameraRetryIntervalId = null;
-    let currentInvite = "";
 
     function setGuidanceMessage(text = 'Waiting for guidance...') {
       if (!guidancePanel) return;
@@ -1077,7 +993,8 @@
         const statusEl = document.getElementById('enrollmentStatus');
         if (statusEl) statusEl.textContent = event;
         stopEnrollmentFrameLoop();
-        cancelEnrollment();
+        window._enrollmentActive = false;
+        stopAll();
         return;
       }
 
@@ -1105,40 +1022,9 @@
     }
 
     function shouldDisplayAlert(data) {
-      // While Add Face is open, only show enrollment-related alerts.
-      if (!_enrollmentOpen) return true;
-      const event = (data && (data.event || data.message) ? String(data.event || data.message) : '').toLowerCase();
-      if (!event) return false;
-
-      if (event === 'ready_for_face_enrollment') return true;
-      if (event.startsWith('enrollment complete')) return true;
-      if (event.includes('good face captured')) return true;
-
-      const allowKeywords = [
-        'move closer',
-        'move slightly back',
-        'hold still',
-        'turn head',
-        'move face into frame',
-        'move your face into frame'
-      ];
-      return allowKeywords.some(k => event.includes(k));
+      return true;
     }
 
-    if (startEnrollmentBtn) {
-      startEnrollmentBtn.dataset.defaultText =
-        startEnrollmentBtn.textContent.trim() || 'Start Enrollment';
-      startEnrollmentBtn.dataset.waitingText = 'Waiting for connection';
-      startEnrollmentBtn.disabled = true;
-    }
-
-    if (enrollmentProgressCircle && enrollmentProgressCircumference) {
-      enrollmentProgressCircle.style.strokeDasharray = enrollmentProgressCircumference;
-      enrollmentProgressCircle.style.strokeDashoffset = enrollmentProgressCircumference;
-    }
-
-    resetEnrollmentProgress();
-    setGuidanceMessage();
 
     // ROI canvases
     const roiCanvas = document.getElementById("roiCanvas");
@@ -2376,16 +2262,9 @@
       if (focusRulesPanel) focusRulesPanel.style.display = 'none';
       roiCanvas.style.display = "none";
       roiDisplayCanvas.style.display = "none";
-      pmRunning = false;
       testRunning = false;
       try {
-        const pmBtn = document.getElementById('pmBtn');
         const testBtn = document.getElementById('testBtn');
-        if (pmBtn) {
-          pmBtn.textContent = 'Start Device Mode';
-          pmBtn.classList.remove('stop');
-          pmBtn.disabled = false;
-        }
         if (testBtn) {
           testBtn.textContent = 'Start CCTV Mode';
           testBtn.classList.remove('stop');
@@ -2408,7 +2287,7 @@
       applyZoom();
       roiDisplayCanvas.style.display = 'block';
       drawRulesOverlay();
-      loadFocusRules(selectedCameraId || 'device');
+      loadFocusRules(selectedCameraId || 1);
     }
 
     function clampPan() {
@@ -2434,7 +2313,7 @@
         const tileId = Number(tile.dataset.cameraId || 0);
         tile.classList.toggle('selected', tileId === nextId);
       });
-      if (rulesCameraSelect && rulesCameraSelect.value !== 'device') {
+      if (rulesCameraSelect) {
         rulesCameraSelect.value = String(nextId);
       }
       if (!inFocusMode) {
@@ -2449,7 +2328,7 @@
 
     async function ensureCCTVForCamera(cameraId) {
       setSelectedCameraId(cameraId);
-      if (_enrollmentOpen || window._enrollmentActive) {
+      if (window._enrollmentActive) {
         addAlert('SYSTEM', 'Finish enrollment before switching modes.');
         return;
       }
@@ -2466,17 +2345,6 @@
           testBtn.classList.add("stop");
         }
         testRunning = true;
-        // Stop Device mode if it's running
-        if (pmRunning) {
-          const pmBtn = document.getElementById("pmBtn");
-          if (pmBtn) {
-            pmBtn.textContent = "Start Device Mode";
-            pmBtn.classList.remove("stop");
-          }
-          pmRunning = false;
-          stopAll({ resetModeButtons: false });
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
         await startTestMode(selectedCameraId);
         return;
       }
@@ -2744,9 +2612,7 @@
           // mark enrollment active and disable mode switches
           window._enrollmentActive = true;
           try {
-            const pmBtn = document.getElementById('pmBtn');
             const testBtn = document.getElementById('testBtn');
-            if (pmBtn) { pmBtn.disabled = true; }
             if (testBtn) { testBtn.disabled = true; }
           } catch (e) { /* ignore */ }
           return;
@@ -2763,12 +2629,11 @@
           // clear enrollment active flag and re-enable mode buttons
           window._enrollmentActive = false;
           try {
-            const pmBtn = document.getElementById('pmBtn');
             const testBtn = document.getElementById('testBtn');
-            if (pmBtn) { pmBtn.disabled = false; }
             if (testBtn) { testBtn.disabled = false; }
           } catch (e) { /* ignore */ }
-          cancelEnrollment();
+          window._enrollmentActive = false;
+          stopAll();
           return;
         }
 
@@ -2777,12 +2642,11 @@
         addAlert("SYSTEM", `Failed to add face: ${reason}`);
         window._enrollmentActive = false;
         try {
-          const pmBtn = document.getElementById('pmBtn');
           const testBtn = document.getElementById('testBtn');
-          if (pmBtn) { pmBtn.disabled = false; }
           if (testBtn) { testBtn.disabled = false; }
         } catch (e) { /* ignore */ }
-        cancelEnrollment();
+        window._enrollmentActive = false;
+        stopAll();
       }
     }
 
@@ -3273,7 +3137,6 @@
       drawDisplayROI();
       addAlert("SYSTEM", "ROI edit cancelled");
     }
-    let _enrollmentOpen = false;
     function delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -3338,131 +3201,6 @@
       throw new Error('Camera unavailable after waiting');
     }
 
-    async function addFace() {
-      const btn = document.getElementById('addFaceBtn');
-      if (_enrollmentOpen) {
-        // act as Cancel
-        return cancelEnrollment();
-      }
-
-      // Stop detection stream
-      stopAll();
-      stopGridView();
-      showFocusUI();
-
-      // small pause to ensure camera device is released before reopening
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Show enrollment panel BELOW video
-      const enrollmentPanel = document.getElementById("faceEnrollment");
-      if (enrollmentPanel) {
-        enrollmentPanel.style.display = "flex";
-      }
-      document.getElementById("faceNameInput").focus();
-
-      // Update button to act as cancel (red)
-      btn.textContent = 'Cancel';
-      btn.classList.add('stop');
-      _enrollmentOpen = true;
-      applyRoleUI(currentRole);
-
-      // Enrollment UI is mutually exclusive with CCTV/Device modes.
-      try {
-        const pmBtn = document.getElementById('pmBtn');
-        const testBtn = document.getElementById('testBtn');
-        if (pmBtn) pmBtn.disabled = true;
-        if (testBtn) testBtn.disabled = true;
-      } catch (e) { /* ignore */ }
-
-      // Use selected camera device for enrollment
-      try {
-        const constraints = getVideoConstraints();
-        if (constraints && constraints.video) {
-          constraints.video.width = { ideal: 640 };
-          constraints.video.height = { ideal: 480 };
-        }
-        const stream = await requestEnrollmentStream(constraints);
-        if (activeVideoEl) {
-          activeVideoEl.srcObject = stream;
-          activeVideoEl.playbackRate = 1.0;
-          activeVideoEl.muted = true;
-          activeVideoEl.autoplay = true;
-          activeVideoEl.setAttribute("playsinline", "");
-          activeVideoEl.setAttribute("webkit-playsinline", "true");
-        }
-
-
-        // Start the enrollment guidance channel only after the local camera is available.
-        ensureEnrollmentConnection().catch(err => {
-          console.error('Enrollment data channel failed', err);
-          addAlert('SYSTEM', 'Enrollment guidance channel unavailable');
-        });
-      } catch (e) {
-        const msg = (e && e.message) ? String(e.message) : '';
-        if (msg.toLowerCase().includes('cancelled')) {
-          return;
-        }
-        // requestEnrollmentStream handles NotReadableError retries; avoid spamming errors.
-        if (isCameraBusyError(e)) {
-          setGuidanceMessage('Camera busy — waiting for it to become available');
-          return;
-        }
-        onCameraError(e);
-      }
-    }
-    function cancelEnrollment() {
-      stopAll();
-      const enrollmentPanel = document.getElementById("faceEnrollment");
-      if (enrollmentPanel) {
-        enrollmentPanel.style.display = "none";
-      }
-
-      window._enrollmentActive = false;
-
-      // Ensure mode buttons are usable after enrollment ends.
-      try {
-        const pmBtn = document.getElementById('pmBtn');
-        const testBtn = document.getElementById('testBtn');
-        if (pmBtn) pmBtn.disabled = false;
-        if (testBtn) testBtn.disabled = false;
-      } catch (e) { /* ignore */ }
-
-      if (activeVideoEl && activeVideoEl.srcObject) {
-        activeVideoEl.srcObject.getTracks().forEach(t => t.stop());
-        activeVideoEl.srcObject = null;
-      }
-
-      if (window._enrollInterval) {
-        clearInterval(window._enrollInterval);
-        window._enrollInterval = null;
-      }
-      if (window._enrollCanvas) {
-        window._enrollCanvas = null;
-        window._enrollCtx = null;
-      }
-
-      const nameInput = document.getElementById("faceNameInput");
-      if (nameInput) {
-        nameInput.value = "";
-      }
-
-      const statusEl = document.getElementById("enrollmentStatus");
-      if (statusEl) {
-        statusEl.textContent = "Position your face in the camera and click Start Enrollment";
-      }
-
-      resetEnrollmentProgress();
-      setGuidanceMessage();
-      updateEnrollmentButtonState();
-
-      const addBtn = document.getElementById('addFaceBtn');
-      if (addBtn) {
-        addBtn.textContent = 'Add Face';
-        addBtn.classList.remove('stop');
-      }
-      _enrollmentOpen = false;
-      applyRoleUI(currentRole);
-    }
     hideROIEditor();
 
 
@@ -3989,15 +3727,7 @@
       if (resetModeButtons) {
         // Reset mode UI state when we truly want to stop everything.
         try {
-          pmRunning = false;
-          testRunning = false;
-          const pmBtn = document.getElementById('pmBtn');
           const testBtn = document.getElementById('testBtn');
-          if (pmBtn) {
-            pmBtn.textContent = 'Start Device Mode';
-            pmBtn.classList.remove('stop');
-            pmBtn.disabled = false;
-          }
           if (testBtn) {
             testBtn.textContent = 'Start CCTV Mode';
             testBtn.classList.remove('stop');
@@ -4009,18 +3739,6 @@
       console.log("✅ All connections stopped");
     }
 
-    function stopDeviceMode() {
-      if (!pmRunning) return;
-      pmRunning = false;
-      const pmBtn = document.getElementById('pmBtn');
-      if (pmBtn) {
-        pmBtn.textContent = 'Start Device Mode';
-        pmBtn.classList.remove('stop');
-      }
-      stopAll({ resetModeButtons: true });
-      showGridUI();
-      startGridView().catch(e => console.error('startGridView failed', e));
-    }
 
     function stopCCTVMode() {
       if (!testRunning) return;
@@ -4106,35 +3824,6 @@
         }
       } catch (e) {
         console.error('hideLoadingOverlay error:', e);
-      }
-    }
-    // ------------------ PM MODE ------------------
-    async function startPMMode() {
-      // start overlay immediately when user clicks Start (no delay)
-      showLoadingOverlay('init');
-      stopGridView();
-      showFocusUI();
-      // ensure any existing streams are stopped before opening a new one
-      try { stopAll({ resetModeButtons: false }); } catch (e) { /* ignore */ }
-      // small delay to ensure devices are released
-      await new Promise(resolve => setTimeout(resolve, 250));
-      try {
-        // Device mode uses the CLIENT camera (phone/laptop)
-        const constraints = getVideoConstraints();
-        // use higher frameRate for PM mode
-        constraints.video.frameRate = { ideal: 30, max: 30 };
-        constraints.video.width = { ideal: 1280 };
-        constraints.video.height = { ideal: 720 };
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-        // Show local preview immediately (especially important on phones)
-        try { if (activeVideoEl) activeVideoEl.srcObject = localStream; } catch (e) { /* ignore */ }
-        await startWebRTC("pm", localStream, { source: "device" });
-      } catch (error) {
-        console.error("Error accessing camera:", error);
-        // hide overlay on error and inform user
-        hideLoadingOverlay();
-        alert("Failed to access camera. Please check permissions.");
       }
     }
 
@@ -4626,40 +4315,9 @@
       });
     });
 
-    // Add Face button handler
-    const addFaceButton = document.getElementById('addFaceBtn');
-    if (addFaceButton) addFaceButton.onclick = addFace;
-
-    document.getElementById("pmBtn").onclick = async () => {
-      if (_enrollmentOpen || window._enrollmentActive) {
-        addAlert('SYSTEM', 'Finish enrollment before switching modes.');
-        return;
-      }
-      const btn = document.getElementById("pmBtn");
-
-      if (!pmRunning) {
-        // Starting Device mode
-        btn.textContent = "Stop Device Mode";
-        btn.classList.add("stop");
-        pmRunning = true;
-        // Stop test mode if it's running
-        if (testRunning) {
-          const testBtn = document.getElementById("testBtn");
-          testBtn.textContent = "Start CCTV Mode";
-          testBtn.classList.remove("stop");
-          testRunning = false;
-          stopAll({ resetModeButtons: false });
-          // Small delay to ensure clean stop
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        await startPMMode();
-      } else {
-        stopDeviceMode();
-      }
-    };
 
     document.getElementById("testBtn").onclick = async () => {
-      if (_enrollmentOpen || window._enrollmentActive) {
+      if (window._enrollmentActive) {
         addAlert('SYSTEM', 'Finish enrollment before switching modes.');
         return;
       }
@@ -4673,10 +4331,6 @@
     const backBtn = document.getElementById("backToGrid");
     if (backBtn) {
       backBtn.onclick = async () => {
-        if (pmRunning) {
-          stopDeviceMode();
-          return;
-        }
         if (testRunning) {
           stopCCTVMode();
           return;
@@ -4780,167 +4434,6 @@
       });
     }
 
-    // Handle enrollment start
-    if (startEnrollmentBtn) {
-      startEnrollmentBtn.addEventListener('click', async function () {
-        const name = document.getElementById('faceNameInput').value.trim();
-        if (!name) {
-          addAlert("SYSTEM", "Please enter a name");
-          return;
-        }
-
-        // Send enrollment request (guard websocket)
-        if (!window.ws || window.ws.readyState !== 1) {
-          addAlert("SYSTEM", "Not connected to server. Try again.");
-          return;
-        }
-
-        try {
-          window.ws.send(JSON.stringify({ action: "enroll_face", name: name }));
-        } catch (e) {
-          console.error('Failed to send enroll request', e);
-          addAlert('SYSTEM', 'Failed to send enroll request');
-          return;
-        }
-
-        resetEnrollmentProgress();
-        setGuidanceMessage();
-
-        // Disable button and show loading
-        const btn = startEnrollmentBtn;
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = "Enrolling...";
-        }
-        // Start sending snapshots from the main video to the server for enrollment
-        try {
-          if (window._enrollInterval) { clearInterval(window._enrollInterval); window._enrollInterval = null; }
-
-          // create a small offscreen canvas for snapshots
-          const canvas = document.createElement('canvas');
-          const vw = videoEl.videoWidth || 640;
-          const vh = videoEl.videoHeight || 480;
-          const TARGET_W = ENROLLMENT_FRAME_WIDTH;
-          const TARGET_H = ENROLLMENT_FRAME_HEIGHT;
-
-          canvas.width = TARGET_W;
-          canvas.height = TARGET_H;
-
-          const cctx = canvas.getContext('2d');
-          cctx.drawImage(videoEl, 0, 0, TARGET_W, TARGET_H);
-          window._enrollCanvas = canvas;
-          window._enrollCtx = cctx;
-
-          // wait for video to be ready (playing) so frames are not empty
-          const ready = await waitForVideoReady(2000);
-          if (!ready) {
-            console.warn('Video not ready before snapshot loop started');
-          }
-
-          // track sent frames for debugging
-          window._enrollSentFrames = 0;
-          window._enrollInterval = setInterval(() => {
-            try {
-              if (!videoEl || !videoEl.srcObject) return;
-
-              // Light backpressure: if WS is congested, skip this tick.
-              if (window.ws && typeof window.ws.bufferedAmount === 'number' && window.ws.bufferedAmount > 5_000_000) {
-                return;
-              }
-
-              // draw current video frame
-              cctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-              const data = canvas.toDataURL('image/jpeg', ENROLLMENT_IMAGE_QUALITY);
-              if (window.ws && window.ws.readyState === 1) {
-                window.ws.send(JSON.stringify({ action: 'enroll_frame', name: name, image: data }));
-                window._enrollSentFrames += 1;
-                // update UI and console for visibility
-                const statusEl = document.getElementById('enrollmentStatus');
-                if (statusEl) statusEl.textContent = `Sending frames for ${name}…`;
-                console.log('enroll_frame sent', window._enrollSentFrames);
-              }
-            } catch (err) {
-              console.error('Error sending enroll frame', err);
-            }
-          }, 200);
-        } catch (err) {
-          console.error('Failed to start enroll snapshot loop', err);
-        }
-      });
-    }
-
-    async function viewDatabase() {
-      try {
-        const resp = await apiFetch('/face/list');
-        if (!resp.ok) {
-          throw new Error(`Server returned ${resp.status}`);
-        }
-        const data = await resp.json();
-        const faces = Array.isArray(data.faces) ? data.faces : [];
-        if (faces.length === 0) {
-          addAlert("SYSTEM", "No faces in database.");
-          return;
-        }
-        faces.sort((a, b) => a.localeCompare(b));
-        let message = "Enrolled Faces:\n\n";
-        faces.forEach((face, index) => {
-          message += `${index + 1}. ${face}\n`;
-        });
-        message += "\nEnter the name to delete (or cancel to close):";
-        const toDelete = prompt(message);
-        if (toDelete && faces.includes(toDelete)) {
-          if (confirm(`Delete face: ${toDelete}?`)) {
-            if (window.ws && window.ws.readyState === 1) {
-              window.ws.send(JSON.stringify({ action: "delete_face", name: toDelete }));
-            } else {
-              addAlert('SYSTEM', 'Not connected to server.');
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch face list', err);
-        addAlert('SYSTEM', `Unable to load database: ${err.message}`);
-      }
-    }
-
-    function deleteFace(name) {
-      if (window.ws && window.ws.readyState === 1) {
-        window.ws.send(JSON.stringify({ action: "delete_face", name: name }));
-      } else {
-        addAlert('SYSTEM', 'Not connected to server.');
-      }
-    }
-
-    async function createEnrollLink() {
-      const res = await apiFetch('/enroll/create', { method: 'POST' });
-      if (!res.ok) {
-        let detail = '';
-        try {
-          detail = await res.text();
-        } catch (e) { /* ignore */ }
-        alert(`Failed to create invite (${res.status})${detail ? `: ${detail}` : ''}`);
-        return;
-      }
-
-      const data = await res.json();
-      currentInvite = location.origin + data.url;
-
-      document.getElementById('inviteLink').value = currentInvite;
-      document.getElementById('inviteModal').style.display = 'block';
-    }
-
-    function copyInvite() {
-      navigator.clipboard.writeText(currentInvite);
-      alert('Link copied');
-    }
-
-    function openInvite() {
-      window.open(currentInvite, '_blank');
-    }
-
-    function closeInvite() {
-      document.getElementById('inviteModal').style.display = 'none';
-    }
   </script>
 
 </body>
