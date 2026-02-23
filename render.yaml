@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: webrtc-yolo-server
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: USE_GPU
+        value: "false"  # ← CHANGE THIS TO "false" FOR CPU
+        sync: false    # Allows changing without redeploy
+    healthCheckPath: /health

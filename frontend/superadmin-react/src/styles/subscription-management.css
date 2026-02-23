@@ -1,0 +1,94 @@
+.subscription-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px; /* smaller space between filter + table */
+}
+
+.filter-card {
+  padding: 12px 16px;
+}
+
+.filters-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.search-small {
+  width: 180px;
+}
+
+.filter-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  font-size: 13px;
+}
+
+.select-wrapper {
+  position: relative;
+}
+
+.select-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.select-wrapper select {
+  padding-left: 30px;
+}
+
+.add-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #111;
+  color: white;
+  border-color: #111;
+}
+
+.btn-icon {
+  position: relative;
+  top: -1px;
+}
+
+.plans-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.plans-table th,
+.plans-table td {
+  padding: 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  text-align: left;
+}
+
+.tag {
+  background: #f1f1f1;
+  padding: 4px 10px;
+  border-radius: 6px;
+  margin-right: 6px;
+  font-size: 12px;
+}
+
+.status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.status.active {
+  background: #111;
+  color: white;
+}
+
+.status.inactive {
+  background: #eee;
+}

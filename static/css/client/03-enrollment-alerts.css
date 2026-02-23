@@ -1,0 +1,402 @@
+/* ── Face Enrollment Card ────────────────────────────────────── */
+#faceEnrollment {
+  flex: 1 1 320px;
+  min-width: 300px;
+  max-width: 480px;
+  display: none;
+}
+
+.enrollment-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid var(--border);
+  padding: 20px;
+  border-radius: 14px;
+  width: 100%;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.enrollment-progress {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.progress-ring {
+  position: relative;
+  width: 120px;
+  height: 120px;
+}
+
+.progress-ring svg {
+  transform: rotate(-90deg);
+  width: 100%;
+  height: 100%;
+}
+
+.progress-ring circle {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.progress-ring__bg {
+  stroke: var(--panel-strong);
+}
+
+.progress-ring__circle {
+  stroke: var(--success);
+  transition: stroke-dashoffset 0.35s ease;
+  stroke-dasharray: 113;
+  stroke-dashoffset: 113;
+}
+
+.progress-ring__text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.guidance-panel {
+  min-width: 180px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+  color: var(--text);
+  font-size: 14px;
+  text-align: center;
+}
+
+#cameraRetryTimer {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  min-height: 18px;
+}
+
+/* ── Alerts Box (modern card design) ─────────────────────────── */
+#alertsBox {
+  flex: 1 1 260px;
+  min-width: 260px;
+  max-height: 700px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  width: min(60vw, 920px);
+  max-width: 920px;
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.08),
+    0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+#alertsBox>h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#alertsBox>h3::before {
+  content: '🔔';
+  font-size: 14px;
+}
+
+/* Inner alerts feed */
+#alerts {
+  width: 100%;
+  max-width: none;
+  max-height: 200px;
+  overflow-y: auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+}
+
+/* Individual alert items */
+.alert-item {
+  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
+  border-left: 3px solid var(--success);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.alert-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.alert {
+  margin-bottom: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.alert strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.alert small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ── Event Clips Panel (modern card design) ──────────────────── */
+#clipsPanel {
+  margin-top: 14px;
+  border-top: 1px solid rgba(226, 232, 240, 0.5);
+  padding-top: 14px;
+}
+
+#clipsPanel>h3 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#clipsPanel>h3::before {
+  content: '🎬';
+  font-size: 13px;
+}
+
+/* Clips panel utility classes */
+.clips-panel {
+  margin-top: 14px;
+  border-top: 1px solid rgba(226, 232, 240, 0.5);
+  padding-top: 14px;
+}
+
+.clips-filter-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.clips-select {
+  background: rgba(241, 245, 249, 0.8);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  transition: border-color 0.15s ease;
+  cursor: pointer;
+}
+
+.clips-select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.clips-search {
+  flex: 1;
+  min-width: 120px;
+  background: rgba(241, 245, 249, 0.8);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  transition: border-color 0.15s ease;
+}
+
+.clips-search:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.clips-clear-btn {
+  background: linear-gradient(135deg, #f1f5f9, #e2e8f0);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.clips-clear-btn:hover {
+  background: #e2e8f0;
+}
+
+.clips-list {
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Clips filter row */
+#clipsPanel select,
+#clipsPanel input[type="text"] {
+  background: rgba(241, 245, 249, 0.8);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  transition: border-color 0.15s ease;
+}
+
+#clipsPanel select:focus,
+#clipsPanel input[type="text"]:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+#clipClearBtn,
+#clipsPanel button {
+  background: linear-gradient(135deg, #f1f5f9, #e2e8f0);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.15s ease;
+}
+
+#clipClearBtn:hover,
+#clipsPanel button:hover {
+  background: #e2e8f0;
+}
+
+/* Clips list cards */
+#clipsList>div {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
+  border: 1px solid rgba(203, 213, 225, 0.5) !important;
+  border-radius: 10px !important;
+  padding: 10px 12px !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+#clipsList>div:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+/* Override dark-mode text colors in clip items */
+#clipsList>div>div:first-child {
+  color: var(--text) !important;
+  font-weight: 600;
+}
+
+#clipsList>div>div:nth-child(2) {
+  color: var(--muted) !important;
+}
+
+#clipsList>div video {
+  border-radius: 8px !important;
+  border: 1px solid var(--border);
+}
+
+#clipsList>div a {
+  color: #6366f1 !important;
+  font-weight: 500;
+}
+
+
+/* ── Loading card ────────────────────────────────────────────── */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-card {
+  background: linear-gradient(145deg,
+      rgba(17, 24, 39, 0.92) 0%,
+      rgba(31, 41, 55, 0.9) 55%,
+      rgba(75, 85, 99, 0.86) 100%);
+  color: #f8fafc;
+  padding: 18px 22px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
+  min-width: 280px;
+}
+
+.loading-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e6ffe9;
+}
+
+.loading-subtitle {
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.loading-progress {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.loading-progress span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #4cd137, #1e7e34);
+  transition: width 0.2s ease;
+}
+
+.loading-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: #cbd5e1;
+}

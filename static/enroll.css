@@ -1,0 +1,224 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap");
+
+:root {
+  --deep: #050c1a;
+
+  /* Green theme */
+  --accent: #4cd137;
+  --accent-strong: #1e7e34;
+
+  --outline: rgba(255, 255, 255, 0.3);
+  --text-muted: rgba(255, 255, 255, 0.65);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  background: radial-gradient(circle at top left, #23c73e 0%, #050c1a 55%),
+    #030712;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+h3 {
+  margin: 0 0 1rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent-strong);
+}
+
+.enroll-shell {
+  width: min(980px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
+  gap: 1.75rem;
+  align-items: start;
+}
+
+.enroll-card {
+  padding: 2.6rem;
+  background: rgba(10, 16, 34, 0.82);
+  border-radius: 1.75rem;
+  border: 1px solid var(--outline);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.6);
+  position: relative;
+  overflow: hidden;
+}
+
+.enroll-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 80% 20%, var(--accent) 0%, transparent 35%);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+form {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.enroll-header {
+  margin-bottom: 1.8rem;
+}
+
+.enroll-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background: rgba(76, 209, 55, 0.16);
+  color: var(--accent);
+  margin-bottom: 0.75rem;
+}
+
+.enroll-subtitle {
+  margin: 0.2rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.enroll-label {
+  margin-top: 1.2rem;
+}
+
+label {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+input[type="text"],
+input[type="file"] {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(149, 184, 148, 0.3);
+  background: rgba(16, 42, 15, 0.8);
+  color: #f8fafc;
+  font-size: 1rem;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.upload-card {
+  margin-top: 0.35rem;
+  padding: 0.85rem 1rem 1rem;
+  border-radius: 1rem;
+  border: 1px dashed rgba(149, 184, 148, 0.4);
+  background: rgba(6, 20, 10, 0.6);
+  display: grid;
+  gap: 0.5rem;
+}
+
+.upload-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.upload-count {
+  font-size: 0.8rem;
+  color: #a7f3d0;
+}
+
+.preview-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  gap: 0.75rem;
+}
+
+.preview-grid img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.status {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.enroll-tips {
+  padding: 2rem;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 12, 26, 0.8);
+  box-shadow: 0 18px 35px rgba(2, 6, 23, 0.45);
+}
+
+.enroll-tips h4 {
+  margin-top: 0;
+  color: #a7f3d0;
+}
+
+.enroll-tips ul {
+  margin: 0.8rem 0 1.2rem;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.tip-note {
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+input:focus {
+  border-color: var(--accent-strong);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+button {
+  margin-top: 1.5rem;
+  padding: 0.95rem 1.2rem;
+  border: none;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #020617;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 15px 30px rgba(76, 209, 55, 0.35);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 35px rgba(76, 209, 55, 0.45);
+}
+
+@media (max-width: 600px) {
+  body {
+    padding: 1.5rem;
+  }
+
+  .enroll-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .enroll-card,
+  .enroll-tips {
+    padding: 1.6rem;
+  }
+}

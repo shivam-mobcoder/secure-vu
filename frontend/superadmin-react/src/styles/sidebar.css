@@ -1,0 +1,66 @@
+.sidebar {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  padding: 20px;
+}
+
+.logo {
+  font-weight: 700;
+  font-size: 18px;
+  margin-bottom: 30px;
+}
+
+/* Base nav item */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+
+  color: var(--text);              /* 🔥 Explicit base color */
+}
+
+/* Make icon follow text color */
+.nav-item svg {
+  stroke: currentColor;
+}
+
+/* Hover */
+.nav-item:hover {
+  background: #f3f4f6;
+}
+
+/* Active */
+.nav-item.active {
+  background: #111;
+  color: #ffffff;
+}
+
+/* Force icon white when active */
+.nav-item.active svg {
+  stroke: #ffffff;
+}
+
+/* Prevent purple visited links */
+.nav-item:visited {
+  color: var(--text);
+}
+
+.sidebar-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0;
+}
+
+.sidebar .nav-item.active {
+  background: #111;
+  color: #ffffff;
+}
+
+.sidebar .nav-item.active svg {
+  stroke: #ffffff;
+}

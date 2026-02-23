@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "cameras": {
+    "1": {
+      "active": true,
+      "active_hours": [
+        {
+          "days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "start": "00:00",
+          "end": "23:59"
+        }
+      ],
+      "max_people": {
+        "enabled": true,
+        "value": 3
+      },
+      "roi_intrusion": {
+        "enabled": true,
+        "zones": [
+          {
+            "id": "Zone 1",
+            "points": [
+              [
+                0.48451327433628316,
+                0.01764705882352941
+              ],
+              [
+                0.5376106194690266,
+                0.013725490196078431
+              ],
+              [
+                0.49557522123893805,
+                0.2725490196078431
+              ],
+              [
+                0.4491150442477876,
+                0.2725490196078431
+              ]
+            ],
+            "classes": [
+              "person"
+            ]
+          },
+          {
+            "id": "Zone 2",
+            "points": [
+              [
+                0.8949115044247787,
+                0.2529411764705882
+              ],
+              [
+                0.9668141592920354,
+                0.3352941176470588
+              ],
+              [
+                0.8938053097345132,
+                0.6274509803921569
+              ],
+              [
+                0.8207964601769911,
+                0.5509803921568628
+              ]
+            ],
+            "classes": [
+              "person"
+            ]
+          }
+        ]
+      },
+      "virtual_lines": {
+        "enabled": false,
+        "lines": []
+      },
+      "unknown_person": {
+        "enabled": true
+      },
+      "vehicle_rules": {
+        "enabled": false,
+        "entry_line_id": "entry",
+        "exit_line_id": "exit",
+        "classes": [
+          "car",
+          "truck",
+          "bus",
+          "motorcycle"
+        ]
+      },
+      "parking_rules": {
+        "enabled": false,
+        "zones": []
+      }
+    },
+    "3": {
+      "active": true,
+      "active_hours": [
+        {
+          "days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "start": "00:00",
+          "end": "23:59"
+        }
+      ],
+      "max_people": {
+        "enabled": false,
+        "value": 5
+      },
+      "roi_intrusion": {
+        "enabled": true,
+        "zones": [
+          {
+            "id": "Zone 1",
+            "points": [
+              [
+                0.36283185840707965,
+                0.0
+              ],
+              [
+                0.49004424778761063,
+                0.00392156862745098
+              ],
+              [
+                0.4668141592920354,
+                0.12549019607843137
+              ],
+              [
+                0.33185840707964603,
+                0.19215686274509805
+              ]
+            ],
+            "classes": [
+              "person"
+            ]
+          }
+        ]
+      },
+      "virtual_lines": {
+        "enabled": false,
+        "lines": []
+      },
+      "unknown_person": {
+        "enabled": true
+      },
+      "vehicle_rules": {
+        "enabled": false,
+        "entry_line_id": "entry",
+        "exit_line_id": "exit",
+        "classes": [
+          "car",
+          "truck",
+          "bus",
+          "motorcycle"
+        ]
+      },
+      "parking_rules": {
+        "enabled": false,
+        "zones": []
+      }
+    },
+    "2": {
+      "active": true,
+      "active_hours": [
+        {
+          "days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "start": "00:00",
+          "end": "23:59"
+        }
+      ],
+      "max_people": {
+        "enabled": false,
+        "value": 5
+      },
+      "roi_intrusion": {
+        "enabled": true,
+        "zones": [
+          {
+            "id": "Zone 1",
+            "points": [
+              [
+                0.8683628318584071,
+                0.17254901960784313
+              ],
+              [
+                0.9944690265486725,
+                0.22549019607843138
+              ],
+              [
+                0.9933628318584071,
+                0.5333333333333333
+              ],
+              [
+                0.8550884955752213,
+                0.3588235294117647
+              ]
+            ],
+            "classes": [
+              "person"
+            ]
+          }
+        ]
+      },
+      "virtual_lines": {
+        "enabled": false,
+        "lines": []
+      },
+      "unknown_person": {
+        "enabled": false
+      },
+      "vehicle_rules": {
+        "enabled": false,
+        "entry_line_id": "entry",
+        "exit_line_id": "exit",
+        "classes": [
+          "car",
+          "truck",
+          "bus",
+          "motorcycle"
+        ]
+      },
+      "parking_rules": {
+        "enabled": false,
+        "zones": []
+      }
+    },
+    "4": {
+      "active": true,
+      "active_hours": [
+        {
+          "days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "start": "00:00",
+          "end": "23:59"
+        }
+      ],
+      "max_people": {
+        "enabled": false,
+        "value": 5
+      },
+      "roi_intrusion": {
+        "enabled": false,
+        "zones": [
+          {
+            "id": "Zone 1",
+            "points": [
+              [
+                0.8783185840707964,
+                0.5647058823529412
+              ],
+              [
+                0.918141592920354,
+                0.6607843137254902
+              ],
+              [
+                0.8329646017699115,
+                0.788235294117647
+              ],
+              [
+                0.7831858407079646,
+                0.7549019607843137
+              ]
+            ],
+            "classes": [
+              "person"
+            ]
+          }
+        ]
+      },
+      "virtual_lines": {
+        "enabled": false,
+        "lines": []
+      },
+      "unknown_person": {
+        "enabled": false
+      },
+      "vehicle_rules": {
+        "enabled": false,
+        "entry_line_id": "entry",
+        "exit_line_id": "exit",
+        "classes": [
+          "car",
+          "truck",
+          "bus",
+          "motorcycle"
+        ]
+      },
+      "parking_rules": {
+        "enabled": false,
+        "zones": []
+      }
+    }
+  }
+}

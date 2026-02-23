@@ -1,0 +1,4948 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <title>Secure View</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/static/client-modern.css" />
+
+</head>
+
+<body>
+  <h2>Secure View </h2>
+
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+    <div id="authBadge" class="auth-badge"></div>
+    <button id="logoutBtn" style="display:none; padding:6px 10px;">Logout</button>
+  </div>
+
+  <div id="superAdminPanel" style="display:none; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <h3 style="margin:0; color:#4cd137;">Clients</h3>
+      <button id="superAdminRefresh" style="padding:6px 10px;">Refresh</button>
+    </div>
+    <div id="superAdminError" style="margin-top:8px; color:#ff6b6b; display:none;"></div>
+    <div style="overflow:auto; margin-top:10px;">
+      <table id="superAdminTable" style="width:100%; border-collapse:collapse; font-size:12px;">
+        <thead>
+          <tr style="text-align:left; color:#9aa0a6; border-bottom:1px solid #333;">
+            <th style="padding:6px;">Name</th>
+            <th style="padding:6px;">Email</th>
+            <th style="padding:6px;">Phone</th>
+            <th style="padding:6px;">Type</th>
+            <th style="padding:6px;">Plan</th>
+            <th style="padding:6px;">Billing</th>
+            <th style="padding:6px;">Next</th>
+            <th style="padding:6px;">Active</th>
+            <th style="padding:6px;">Created</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="btn-row" id="controlRow">
+    <button id="pmBtn">Start Device Mode</button>
+    <button id="testBtn">Start CCTV Mode</button>
+
+    <label for="cctvSelect" style="align-self:center; color:#ccc;">CCTV:</label>
+    <select id="cctvSelect" style="padding:8px; border-radius:5px; background:#222; color:#fff; border:1px solid #333;">
+      <option value="1">Camera 1</option>
+      <option value="2">Camera 2</option>
+      <option value="3">Camera 3</option>
+      <option value="4">Camera 4</option>
+    </select>
+    <!-- CCTV local-camera checkbox removed to restore stable defaults -->
+    <button id="addFaceBtn">Add Face</button>
+    <button id="viewDatabaseBtn" onclick="viewDatabase()">View Database</button>
+    <button onclick="createEnrollLink()" class="invite-btn">
+      Invite Person
+    </button>
+  </div>
+
+  <div id="inviteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999">
+    <div
+      style="max-width:420px;margin:10% auto;background:#0b1224;padding:24px;border-radius:16px;border:1px solid rgba(255,255,255,.2)">
+      <h3 style="margin-top:0">Enrollment Link</h3>
+
+      <input id="inviteLink" readonly
+        style="width:100%;padding:10px;border-radius:8px;border:1px solid #333;background:#050c1a;color:white">
+
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button onclick="openInvite()">Open</button>
+        <button onclick="copyInvite()">Copy</button>
+        <button onclick="closeInvite()">Close</button>
+      </div>
+    </div>
+  </div>
+  <div class="camera-grid" id="cameraGrid" aria-label="CCTV camera selector">
+    <div class="camera-tile" data-camera-id="1" role="button" tabindex="0">
+      <video id="video1" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <div class="camera-label">Camera 1</div>
+    </div>
+    <div class="camera-tile" data-camera-id="2" role="button" tabindex="0">
+      <video id="video2" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <div class="camera-label">Camera 2</div>
+    </div>
+    <div class="camera-tile" data-camera-id="3" role="button" tabindex="0">
+      <video id="video3" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <div class="camera-label">Camera 3</div>
+    </div>
+    <div class="camera-tile" data-camera-id="4" role="button" tabindex="0">
+      <video id="video4" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <div class="camera-label">Camera 4</div>
+    </div>
+  </div>
+
+  <div class="focus-controls" id="focusControls">
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button id="zoomOut">-</button>
+      <input id="zoomRange" type="range" min="1" max="3" step="0.1" value="1" style="width:140px;" />
+      <button id="zoomIn">+</button>
+      <button id="zoomReset">Reset</button>
+    </div>
+    <button id="backToGrid">Back to Grid</button>
+  </div>
+
+  <div class="focus-container" id="focusContainer">
+    <video id="focusVideo" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+  </div>
+
+  <div class="focus-rules-panel" id="focusRulesPanel" style="display:none;">
+    <div class="rules-compact-row" style="justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <strong style="color:#4cd137;">Camera Rules</strong>
+        <span id="focusRulesCameraLabel" style="color:#9aa0a6; font-size:13px;">Camera</span>
+        <select id="focusCameraProfile"
+          style="padding:4px 8px; background:#222; color:#eee; border:1px solid #333; border-radius:6px;">
+          <option value="office">Office</option>
+          <option value="parking">Parking</option>
+          <option value="home">Home</option>
+          <option value="public">Public</option>
+        </select>
+      </div>
+      <div class="rules-actions-compact">
+        <button id="focusRulesLoad" style="background:#333;color:#fff;">Load</button>
+        <button id="focusRulesClear" style="background:#444;color:#fff;">Clear Zones</button>
+        <button id="focusRulesSync" style="background:#2b2b2b;color:#fff;">Sync</button>
+        <button id="focusRulesSave">Save</button>
+      </div>
+    </div>
+
+    <div class="focus-rules-tabs">
+      <button class="focus-tab active" data-tab="zones">Zones</button>
+      <button class="focus-tab" data-tab="lines">Lines</button>
+      <button class="focus-tab" data-tab="parking">Parking</button>
+      <button class="focus-tab" data-tab="people">People</button>
+      <button class="focus-tab" data-tab="schedule">Schedule</button>
+    </div>
+
+    <div class="focus-rules-content active" id="focusTab-zones">
+      <div class="rules-compact-row">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="focusRoiEnabled" /> Enabled
+        </label>
+        <button id="focusAddZone" class="primary">Add Zone</button>
+        <small style="color:#777;">Click to draw polygon. Double-click to close.</small>
+      </div>
+      <div class="rules-list-compact" id="focusZoneList"></div>
+    </div>
+
+    <div class="focus-rules-content" id="focusTab-lines">
+      <div class="rules-compact-row">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="focusLinesEnabled" /> Enabled
+        </label>
+        <button id="focusAddLine" class="primary">Add Line</button>
+        <small style="color:#777;">Click two points on video.</small>
+      </div>
+      <div class="rules-list-compact" id="focusLineList"></div>
+    </div>
+
+    <div class="focus-rules-content" id="focusTab-parking">
+      <div class="rules-compact-row">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="focusParkingEnabled" /> Enabled
+        </label>
+        <button id="focusAddParking" class="primary">Add Parking Zone</button>
+      </div>
+      <div class="rules-list-compact" id="focusParkingList"></div>
+    </div>
+
+    <div class="focus-rules-content" id="focusTab-people">
+      <div class="rules-compact-row">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="focusUnknownEnabled" /> Unknown person alert
+        </label>
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="focusMaxPeopleEnabled" /> Max people
+        </label>
+        <input type="number" id="focusMaxPeopleValue" min="0" value="5" style="width:90px;" />
+      </div>
+    </div>
+
+    <div class="focus-rules-content" id="focusTab-schedule">
+      <div class="rules-compact-row">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="focusRulesActive" /> Active
+        </label>
+        <label>Start</label>
+        <input type="time" id="focusRulesStart" value="00:00" />
+        <label>End</label>
+        <input type="time" id="focusRulesEnd" value="23:59" />
+      </div>
+      <div class="rules-compact-row" id="focusRulesDays">
+        <label><input type="checkbox" data-day="0" checked /> Mon</label>
+        <label><input type="checkbox" data-day="1" checked /> Tue</label>
+        <label><input type="checkbox" data-day="2" checked /> Wed</label>
+        <label><input type="checkbox" data-day="3" checked /> Thu</label>
+        <label><input type="checkbox" data-day="4" checked /> Fri</label>
+        <label><input type="checkbox" data-day="5" checked /> Sat</label>
+        <label><input type="checkbox" data-day="6" checked /> Sun</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="rules-modal" id="zoneRulesModal">
+    <div class="rules-modal-content">
+      <h4 id="zoneModalTitle">Zone Rules</h4>
+      <label>Name</label>
+      <input type="text" id="zoneModalName" placeholder="Zone 1" />
+      <label>Classes (comma separated)</label>
+      <input type="text" id="zoneModalClasses" placeholder="person,car" />
+      <label style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+        <input type="checkbox" id="zoneModalEnabled" /> Enabled
+      </label>
+      <label style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+        <input type="checkbox" id="zoneModalVisible" /> Show on video
+      </label>
+      <div id="zoneModalRoiOptions" style="display:none;">
+        <label style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+          <input type="checkbox" id="zoneModalPersonEntry" /> Alert on person entry
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+          <input type="checkbox" id="zoneModalUnknown" /> Alert on unknown person (global)
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+          <input type="checkbox" id="zoneModalCrowd" /> Enable crowd limit (global)
+        </label>
+        <input type="number" id="zoneModalCrowdValue" min="0" value="5" />
+      </div>
+      <div id="zoneModalExtra" style="display:none;"></div>
+      <div class="rules-modal-actions">
+        <button id="zoneModalCancel" style="background:#333;color:#fff;">Cancel</button>
+        <button id="zoneModalSave" class="primary">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="alertsBox" style="display:none;">
+    <h3>Alerts</h3>
+    <div id="alerts"></div>
+    <div id="clipsPanel" class="clips-panel">
+      <h3>Event Clips</h3>
+      <div class="clips-filter-row">
+        <select id="clipFilterCamera" class="clips-select">
+          <option value="">All Cams</option>
+          <option value="1">CAM1</option>
+          <option value="2">CAM2</option>
+          <option value="3">CAM3</option>
+          <option value="4">CAM4</option>
+        </select>
+        <select id="clipFilterType" class="clips-select">
+          <option value="">All Types</option>
+          <option value="ZONE">ZONE</option>
+          <option value="LINE">LINE</option>
+          <option value="WEBROI">WEBROI</option>
+          <option value="PARKING">PARKING</option>
+          <option value="VEHICLE">VEHICLE</option>
+        </select>
+        <input id="clipFilterText" type="text" placeholder="Search event" class="clips-search" />
+        <button id="clipClearBtn" class="clips-clear-btn">Clear</button>
+      </div>
+      <div id="clipsList" class="clips-list"></div>
+    </div>
+  </div>
+
+  <canvas id="roiCanvas"></canvas>
+  <canvas id="roiDisplayCanvas"></canvas>
+
+  <div class="below-video-row">
+    <div id="faceEnrollment">
+      <div class="enrollment-card">
+
+        <h3 style="color:#4cd137; margin-bottom:16px;">Add New Face</h3>
+
+        <input type="text" id="faceNameInput" placeholder="Enter name" style="
+        padding:10px;
+        width:100%;
+        margin-bottom:14px;
+        border:1px solid #333;
+        border-radius:5px;
+        background:#333;
+        color:#fff;
+      ">
+
+        <div id="enrollmentStatus" style="margin-bottom:14px; color:#ccc; font-size:14px;">
+          Position your face in the camera and click Start Enrollment
+        </div>
+
+        <div class="enrollment-progress">
+          <div class="progress-ring" role="img" aria-label="Enrollment progress">
+            <svg viewBox="0 0 36 36">
+              <circle class="progress-ring__bg" cx="18" cy="18" r="17"></circle>
+              <circle class="progress-ring__circle" id="enrollmentProgressCircle" cx="18" cy="18" r="17"></circle>
+            </svg>
+            <div class="progress-ring__text" id="enrollmentProgressText">0 / 12</div>
+          </div>
+          <div class="guidance-panel" id="serverGuidance" aria-live="polite">
+            Waiting for guidance...
+          </div>
+          <div id="cameraRetryTimer" class="camera-retry"></div>
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button id="startEnrollmentBtn">Start Enrollment</button>
+          <button onclick="cancelEnrollment()" style="background:#333;color:#fff;">
+            Cancel
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="rulesPanel" style="display:none;">
+      <div class="rules-card">
+        <h3 style="color:#4cd137; margin:0;">Camera Rules</h3>
+        <div class="rules-row">
+          <label for="rulesCameraSelect">Camera</label>
+          <select id="rulesCameraSelect"></select>
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="rulesActive" /> Active
+          </label>
+        </div>
+
+        <div class="rules-section">
+          <h4>Active Hours</h4>
+          <div class="rules-row">
+            <label>Start</label>
+            <input type="time" id="rulesStart" value="00:00" />
+            <label>End</label>
+            <input type="time" id="rulesEnd" value="23:59" />
+          </div>
+          <div class="rules-row" id="rulesDays">
+            <label><input type="checkbox" data-day="0" checked /> Mon</label>
+            <label><input type="checkbox" data-day="1" checked /> Tue</label>
+            <label><input type="checkbox" data-day="2" checked /> Wed</label>
+            <label><input type="checkbox" data-day="3" checked /> Thu</label>
+            <label><input type="checkbox" data-day="4" checked /> Fri</label>
+            <label><input type="checkbox" data-day="5" checked /> Sat</label>
+            <label><input type="checkbox" data-day="6" checked /> Sun</label>
+          </div>
+        </div>
+
+        <div class="rules-section">
+          <h4>Max People</h4>
+          <div class="rules-row">
+            <label style="display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="rulesMaxPeopleEnabled" /> Enabled
+            </label>
+            <label>Limit</label>
+            <input type="number" id="rulesMaxPeopleValue" min="0" value="5" style="width:100px;" />
+          </div>
+        </div>
+
+        <div class="rules-section">
+          <h4>Unknown Person Alert</h4>
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="rulesUnknownEnabled" /> Enabled
+          </label>
+        </div>
+
+        <div class="rules-section">
+          <h4>ROI Intrusion</h4>
+          <div class="rules-row">
+            <label style="display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="rulesRoiEnabled" /> Enabled
+            </label>
+            <button id="addRoiZone">Add ROI Zone</button>
+          </div>
+          <div class="rules-list" id="roiZoneList"></div>
+        </div>
+
+        <div class="rules-section">
+          <h4>Virtual Lines</h4>
+          <div class="rules-row">
+            <label style="display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="rulesLinesEnabled" /> Enabled
+            </label>
+            <button id="addLine">Add Line</button>
+          </div>
+          <div class="rules-list" id="lineList"></div>
+        </div>
+
+        <div class="rules-section">
+          <h4>Vehicle Entry / Exit</h4>
+          <div class="rules-row">
+            <label style="display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="rulesVehicleEnabled" /> Enabled
+            </label>
+          </div>
+          <div class="rules-row">
+            <label>Entry Line ID</label>
+            <input type="text" id="rulesVehicleEntry" placeholder="entry" />
+            <label>Exit Line ID</label>
+            <input type="text" id="rulesVehicleExit" placeholder="exit" />
+          </div>
+          <div class="rules-row">
+            <label>Classes</label>
+            <input type="text" id="rulesVehicleClasses" placeholder="car,truck,bus" style="flex:1;" />
+          </div>
+        </div>
+
+        <div class="rules-section">
+          <h4>Parking Rules</h4>
+          <div class="rules-row">
+            <label style="display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="rulesParkingEnabled" /> Enabled
+            </label>
+            <button id="addParkingZone">Add Parking Zone</button>
+          </div>
+          <div class="rules-list" id="parkingZoneList"></div>
+        </div>
+
+        <div class="rules-actions">
+          <button id="loadRulesBtn" style="background:#333;color:#fff;">Load</button>
+          <button id="saveRulesBtn">Save</button>
+        </div>
+        <div class="rules-status" id="rulesStatus"></div>
+        <small style="color:#777;">Points are normalized (0–1). Example:
+          [[0.1,0.1],[0.4,0.1],[0.4,0.4],[0.1,0.4]]</small>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="loadingOverlay"
+    style="display:none; position:fixed; inset:0; align-items:center; justify-content:center; z-index:10000; pointer-events:auto;">
+    <div class="loading-card">
+      <div class="loader"
+        style="width:36px; height:36px; border-radius:50%; border:4px solid rgba(255,255,255,0.15); border-top-color:#4cd137; animation:spin 1s linear infinite;">
+      </div>
+      <div class="loading-title" id="loadingTitle">Connecting</div>
+      <div class="loading-subtitle" id="loadingSubtitle">Initializing connection…</div>
+      <div class="loading-progress"><span id="loadingProgress"></span></div>
+      <div class="loading-meta">
+        <span id="loadingTimer">0.0s</span>
+        <span id="loadingHint">Waiting for video…</span>
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button class="stop" onclick="stopAll()" style="padding:8px 12px;">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-card">
+      <h4>Sign in</h4>
+      <div style="font-size:12px; color:#aaa;">Use your account to access cameras and rules.</div>
+      <select id="loginRole" style="margin-top:8px;">
+        <option value="" selected>Select role</option>
+        <option value="super_admin">Super Admin</option>
+        <option value="admin">Client Admin</option>
+        <option value="member">Member</option>
+      </select>
+      <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" />
+      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
+      <div id="loginError" class="login-error"></div>
+      <button id="loginSubmit">Login</button>
+    </div>
+  </div>
+
+  <script>
+    let pc = null;
+    let localStream = null;
+    let appStarted = false;
+    const _queryToken = (() => {
+      try {
+        return (new URLSearchParams(window.location.search || '').get('token') || '').trim();
+      } catch (e) {
+        return '';
+      }
+    })();
+    if (_queryToken) {
+      localStorage.setItem('authToken', _queryToken);
+      try {
+        const clean = window.location.origin + window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, clean);
+      } catch (e) {
+        // no-op
+      }
+    }
+    let authToken = localStorage.getItem('authToken') || '';
+    let currentUser = null;
+    let currentRole = null;
+    const videoEls = {
+      1: document.getElementById("video1"),
+      2: document.getElementById("video2"),
+      3: document.getElementById("video3"),
+      4: document.getElementById("video4"),
+    };
+    let activeVideoEl = videoEls[1];
+    let activeTileEl = document.querySelector('.camera-tile[data-camera-id="1"]');
+    const focusVideoEl = document.getElementById("focusVideo");
+    const focusContainerEl = document.getElementById("focusContainer");
+    const focusControlsEl = document.getElementById("focusControls");
+    const alertsBoxEl = document.getElementById("alertsBox");
+    Object.values(videoEls).forEach((el) => {
+      if (!el) return;
+      el.addEventListener('error', (event) => onCameraError(event?.error || event));
+      el.addEventListener('stalled', () => onCameraError({ message: 'Camera feed stalled' }));
+    });
+    const alertsDiv = document.getElementById("alerts");
+    const clipsListDiv = document.getElementById("clipsList");
+    const clipFilterCameraEl = document.getElementById("clipFilterCamera");
+    const clipFilterTypeEl = document.getElementById("clipFilterType");
+    const clipFilterTextEl = document.getElementById("clipFilterText");
+    const clipClearBtnEl = document.getElementById("clipClearBtn");
+    const CLIP_STORE_KEY = "securecv_event_clips_v1";
+    let eventClips = [];
+
+    function _loadEventClips() {
+      try {
+        const raw = localStorage.getItem(CLIP_STORE_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(arr)) {
+          eventClips = arr.slice(0, 300);
+        }
+      } catch (e) {
+        eventClips = [];
+      }
+    }
+
+    function _saveEventClips() {
+      try {
+        localStorage.setItem(CLIP_STORE_KEY, JSON.stringify(eventClips.slice(0, 300)));
+      } catch (e) {
+        // no-op
+      }
+    }
+
+    function _parseClipMeta(item) {
+      const ev = String(item.event || '');
+      const m = ev.match(/CAM(\d+)/i);
+      const camera = item?.meta?.camera_id != null ? String(item.meta.camera_id) : (m ? String(m[1]) : '');
+      let type = 'OTHER';
+      if (/WEBROI/i.test(ev)) type = 'WEBROI';
+      else if (/\bZONE\b/i.test(ev)) type = 'ZONE';
+      else if (/\bLINE\b/i.test(ev)) type = 'LINE';
+      else if (/PARKING/i.test(ev)) type = 'PARKING';
+      else if (/VEHICLE/i.test(ev)) type = 'VEHICLE';
+      return { camera, type };
+    }
+
+    function _addClipFromAlert(item) {
+      const clipUrl = item?.clip_url || item?.clipUrl;
+      if (!clipUrl) return;
+      const { camera, type } = _parseClipMeta(item);
+      const rec = {
+        id: `${clipUrl}|${item.timestamp || Date.now()}`,
+        camera,
+        type,
+        person: item.person || 'SYSTEM',
+        event: item.event || 'CLIP_SAVED',
+        timestamp: item.timestamp || new Date().toLocaleString(),
+        clip_url: clipUrl,
+      };
+
+      const existingIdx = eventClips.findIndex(x => x.clip_url === rec.clip_url);
+      if (existingIdx >= 0) {
+        eventClips.splice(existingIdx, 1);
+      }
+      eventClips.unshift(rec);
+      if (eventClips.length > 300) eventClips = eventClips.slice(0, 300);
+      _saveEventClips();
+      renderClipsList();
+    }
+
+    function renderClipsList() {
+      if (!clipsListDiv) return;
+      const camF = (clipFilterCameraEl?.value || '').trim();
+      const typeF = (clipFilterTypeEl?.value || '').trim().toUpperCase();
+      const textF = (clipFilterTextEl?.value || '').trim().toLowerCase();
+
+      const rows = eventClips.filter((r) => {
+        if (camF && String(r.camera || '') !== camF) return false;
+        if (typeF && String(r.type || '').toUpperCase() !== typeF) return false;
+        if (textF) {
+          const hay = `${r.person || ''} ${r.event || ''}`.toLowerCase();
+          if (!hay.includes(textF)) return false;
+        }
+        return true;
+      });
+
+      clipsListDiv.innerHTML = '';
+      if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.style.color = '#9ca3af';
+        empty.style.fontSize = '12px';
+        empty.textContent = 'No clips yet.';
+        clipsListDiv.appendChild(empty);
+        return;
+      }
+
+      rows.slice(0, 120).forEach((r) => {
+        const row = document.createElement('div');
+        row.style.background = '#111827';
+        row.style.border = '1px solid #374151';
+        row.style.borderRadius = '6px';
+        row.style.padding = '6px 8px';
+        row.style.display = 'flex';
+        row.style.flexDirection = 'column';
+        row.style.gap = '4px';
+
+        const t1 = document.createElement('div');
+        t1.style.fontSize = '12px';
+        t1.style.color = '#e5e7eb';
+        t1.textContent = `[${r.timestamp}] CAM${r.camera || '?'} | ${r.type} | ${r.person}`;
+
+        const t2 = document.createElement('div');
+        t2.style.fontSize = '12px';
+        t2.style.color = '#9ca3af';
+        t2.textContent = r.event || '';
+
+        // Build URL with auth token
+        let openUrl = r.clip_url;
+        try {
+          if (authToken && !/[?&]token=/.test(openUrl)) {
+            openUrl += (openUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(authToken);
+          }
+        } catch (e) {
+          openUrl = r.clip_url;
+        }
+
+        // Inline video player
+        const video = document.createElement('video');
+        video.src = openUrl;
+        video.controls = true;
+        video.preload = 'metadata';
+        video.style.width = '100%';
+        video.style.maxHeight = '180px';
+        video.style.borderRadius = '4px';
+        video.style.marginTop = '4px';
+        video.style.background = '#000';
+
+        // Fallback link
+        const link = document.createElement('a');
+        link.href = openUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Open in new tab';
+        link.style.color = '#7dd3fc';
+        link.style.textDecoration = 'underline';
+        link.style.fontSize = '11px';
+
+        row.appendChild(t1);
+        row.appendChild(t2);
+        row.appendChild(video);
+        row.appendChild(link);
+        clipsListDiv.appendChild(row);
+      });
+    }
+
+    _loadEventClips();
+    renderClipsList();
+    clipFilterCameraEl?.addEventListener('change', renderClipsList);
+    clipFilterTypeEl?.addEventListener('change', renderClipsList);
+    clipFilterTextEl?.addEventListener('input', renderClipsList);
+    clipClearBtnEl?.addEventListener('click', () => {
+      eventClips = [];
+      _saveEventClips();
+      renderClipsList();
+    });
+    const startEnrollmentBtn = document.getElementById('startEnrollmentBtn');
+    const guidancePanel = document.getElementById('serverGuidance');
+    const enrollmentProgressCircle = document.getElementById('enrollmentProgressCircle');
+    const enrollmentProgressText = document.getElementById('enrollmentProgressText');
+    const ENROLL_TARGET = 12;
+    const enrollmentProgressCircumference = enrollmentProgressCircle
+      ? 2 * Math.PI * enrollmentProgressCircle.r.baseVal.value
+      : 0;
+
+    const ENROLLMENT_FRAME_WIDTH = 640;
+    const ENROLLMENT_FRAME_HEIGHT = 480;
+    const ENROLLMENT_IMAGE_QUALITY = 0.85;
+    const VIDEO_TRACK_BITRATE = 6_000_000;
+
+    const loginOverlayEl = document.getElementById('loginOverlay');
+    const loginEmailEl = document.getElementById('loginEmail');
+    const loginPasswordEl = document.getElementById('loginPassword');
+    const loginErrorEl = document.getElementById('loginError');
+    const loginSubmitEl = document.getElementById('loginSubmit');
+    const authBadgeEl = document.getElementById('authBadge');
+    const logoutBtnEl = document.getElementById('logoutBtn');
+    const superAdminPanelEl = document.getElementById('superAdminPanel');
+    const superAdminTableEl = document.getElementById('superAdminTable');
+    const superAdminErrorEl = document.getElementById('superAdminError');
+    const superAdminRefreshEl = document.getElementById('superAdminRefresh');
+    const controlRowEl = document.getElementById('controlRow');
+    const rulesPanelEl = document.getElementById('rulesPanel');
+    const focusRulesPanelEl = document.getElementById('focusRulesPanel');
+    const faceEnrollmentEl = document.getElementById('faceEnrollment');
+    const editRoiBtn = document.getElementById('editROI');
+    const saveRoiBtn = document.getElementById('saveROI');
+    const cancelRoiBtn = document.getElementById('cancelROI');
+    const addFaceBtn = document.getElementById('addFaceBtn');
+    const inviteBtn = document.querySelector('.invite-btn');
+    const viewDatabaseBtn = document.getElementById('viewDatabaseBtn');
+
+    function normalizeRole(role) {
+      const raw = (role || '').toString().trim().toLowerCase().replace(/[-\s]+/g, '_');
+      const map = {
+        admin: 'admin',
+        customer_admin: 'admin',
+        operator: 'member',
+        viewer: 'member',
+        superadmin: 'super_admin',
+        super_admin: 'super_admin',
+        'super-admin': 'super_admin',
+        'super admin': 'super_admin'
+      };
+      return map[raw] || raw;
+    }
+
+    function setAuthBadge(user) {
+      if (!authBadgeEl) return;
+      if (!user || !user.role) {
+        authBadgeEl.style.display = 'none';
+        authBadgeEl.textContent = '';
+        if (logoutBtnEl) logoutBtnEl.style.display = 'none';
+        return;
+      }
+      const displayRole = normalizeRole(user.role);
+      authBadgeEl.style.display = 'inline-flex';
+      authBadgeEl.textContent = `Role: ${displayRole}`;
+      if (logoutBtnEl) logoutBtnEl.style.display = 'inline-flex';
+    }
+
+    function getRoleCaps(role) {
+      role = normalizeRole(role);
+      const isSuper = role === 'super_admin';
+      const isAdmin = role === 'admin';
+      const isMember = role === 'member';
+      return {
+        isSuper,
+        isAdmin,
+        isMember,
+        canViewRules: isAdmin || isMember,
+        canManageRules: isAdmin,
+        canViewFaces: isAdmin || isMember,
+        canManageFaces: isAdmin,
+      };
+    }
+
+    function applyRoleUI(role) {
+      const caps = getRoleCaps(role);
+
+      if (superAdminPanelEl) {
+        superAdminPanelEl.style.display = caps.isSuper ? 'block' : 'none';
+      }
+      if (controlRowEl) {
+        controlRowEl.style.display = caps.isSuper ? 'none' : 'flex';
+      }
+      if (document.getElementById('cameraGrid')) {
+        document.getElementById('cameraGrid').style.display = caps.isSuper ? 'none' : 'grid';
+      }
+      if (focusContainerEl) focusContainerEl.style.display = caps.isSuper ? 'none' : 'block';
+      if (focusControlsEl) focusControlsEl.style.display = caps.isSuper ? 'none' : 'flex';
+      if (alertsBoxEl) alertsBoxEl.style.display = caps.isSuper ? 'none' : 'flex';
+      if (focusRulesPanel) focusRulesPanel.style.display = caps.isSuper ? 'none' : 'block';
+
+      if (rulesPanelEl) {
+        rulesPanelEl.style.display = 'none';
+      }
+      if (focusRulesPanelEl) {
+        focusRulesPanelEl.style.display = caps.canViewRules ? 'block' : 'none';
+      }
+
+      const manageRuleButtons = [editRoiBtn, saveRoiBtn, cancelRoiBtn, addRoiZoneBtn];
+      manageRuleButtons.forEach(btn => {
+        if (!btn) return;
+        btn.style.display = caps.canManageRules ? '' : 'none';
+        btn.disabled = !caps.canManageRules;
+      });
+
+      if (faceEnrollmentEl) {
+        faceEnrollmentEl.style.display = _enrollmentOpen && caps.canManageFaces ? 'flex' : 'none';
+      }
+      if (addFaceBtn) {
+        addFaceBtn.style.display = caps.canManageFaces ? '' : 'none';
+        addFaceBtn.disabled = !caps.canManageFaces;
+      }
+      if (viewDatabaseBtn) {
+        viewDatabaseBtn.style.display = caps.canViewFaces ? '' : 'none';
+      }
+      if (startEnrollmentBtn) {
+        startEnrollmentBtn.disabled = !caps.canManageFaces;
+      }
+      if (inviteBtn) {
+        inviteBtn.style.display = caps.canManageFaces ? '' : 'none';
+      }
+    }
+
+    async function loadSuperAdminClients() {
+      if (!superAdminTableEl) return;
+      const tbody = superAdminTableEl.querySelector('tbody');
+      if (!tbody) return;
+      if (superAdminErrorEl) {
+        superAdminErrorEl.style.display = 'none';
+        superAdminErrorEl.textContent = '';
+      }
+      tbody.innerHTML = '';
+      try {
+        const resp = await apiFetch('/api/super-admin/clients');
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error(text || `Request failed ${resp.status}`);
+        }
+        const rows = await resp.json();
+        (rows || []).forEach(row => {
+          const tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid #2b2b2b';
+          tr.innerHTML = `
+            <td style="padding:6px;">${row.name || ''}</td>
+            <td style="padding:6px;">${row.email || ''}</td>
+            <td style="padding:6px;">${row.phone || ''}</td>
+            <td style="padding:6px;">${row.customer_type || ''}</td>
+            <td style="padding:6px;">${row.subscription_plan || ''}</td>
+            <td style="padding:6px;">${row.billing_cycle || ''}</td>
+            <td style="padding:6px;">${row.next_billing_date || ''}</td>
+            <td style="padding:6px;">${row.is_active ? 'Yes' : 'No'}</td>
+            <td style="padding:6px;">${row.created_at || ''}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        if (superAdminErrorEl) {
+          superAdminErrorEl.textContent = e && e.message ? e.message : 'Failed to load clients';
+          superAdminErrorEl.style.display = 'block';
+        }
+      }
+    }
+
+    function showLoginOverlay(message) {
+      if (loginErrorEl) loginErrorEl.textContent = message || '';
+      if (loginOverlayEl) loginOverlayEl.style.display = 'flex';
+    }
+
+    function hideLoginOverlay() {
+      if (loginOverlayEl) loginOverlayEl.style.display = 'none';
+      if (loginErrorEl) loginErrorEl.textContent = '';
+    }
+
+    function redirectToReactDashboard() {
+      const target = '/super-admin/dashboard';
+      if ((window.location.pathname || '') !== target) {
+        window.location.replace(target);
+      }
+    }
+
+    function setAuthToken(token) {
+      authToken = token || '';
+      if (authToken) {
+        localStorage.setItem('authToken', authToken);
+      } else {
+        localStorage.removeItem('authToken');
+      }
+    }
+
+    async function apiFetch(url, options = {}) {
+      const headers = new Headers(options.headers || {});
+      if (authToken) {
+        headers.set('Authorization', `Bearer ${authToken}`);
+      }
+      const resp = await fetch(url, { ...options, headers });
+      if (resp.status === 401) {
+        setAuthToken('');
+        setAuthBadge(null);
+        showLoginOverlay('Please login to continue.');
+        throw new Error('Unauthorized');
+      }
+      return resp;
+    }
+
+    async function fetchMe() {
+      const resp = await apiFetch('/me');
+      if (!resp.ok) throw new Error('Auth check failed');
+      return await resp.json();
+    }
+
+    async function bootstrapAfterAuth() {
+      if (appStarted) return;
+      appStarted = true;
+      if (getRoleCaps(currentRole).isSuper) {
+        await loadSuperAdminClients();
+        return;
+      }
+      connectWebSocket();
+      populateCameras().catch(e => console.warn('populateCameras failed', e));
+      setSelectedCameraId(1);
+      bindCameraTiles();
+      bindCctvSelect();
+      const caps = getRoleCaps(currentRole);
+      if (caps.canViewRules) {
+        initRulesUI();
+      }
+      startGridView().catch(e => console.error('startGridView failed', e));
+    }
+
+    async function ensureAuth() {
+      if (!authToken) {
+        currentUser = null;
+        currentRole = null;
+        setAuthBadge(null);
+        applyRoleUI(null);
+        showLoginOverlay('Please login to continue.');
+        return;
+      }
+      try {
+        const me = await fetchMe();
+        currentUser = me;
+        currentRole = normalizeRole(me?.role || null);
+        setAuthBadge(me);
+        applyRoleUI(currentRole);
+        hideLoginOverlay();
+        if (getRoleCaps(currentRole).isSuper) {
+          redirectToReactDashboard();
+        } else {
+          await bootstrapAfterAuth();
+        }
+        return;
+      } catch (e) {
+        setAuthToken('');
+        currentUser = null;
+        currentRole = null;
+        setAuthBadge(null);
+        applyRoleUI(null);
+        showLoginOverlay('Session expired. Please login.');
+      }
+    }
+
+    let webRtcReady = false;
+    let dataChannelReady = false;
+    window._enrollmentActive = window._enrollmentActive || false;
+    // Enrollment guidance now relies solely on server guidance/state.
+    let enrollmentChannelPromise = null;
+    let guidanceAlertReceived = false;
+    let suppressCameraErrors = false;
+    let enrollmentStreamRetryActive = false;
+    let cameraRetryIntervalId = null;
+    let currentInvite = "";
+
+    function setGuidanceMessage(text = 'Waiting for guidance...') {
+      if (!guidancePanel) return;
+      guidancePanel.textContent = text;
+    }
+
+    function setEnrollmentProgress(count = 0, target = ENROLL_TARGET) {
+      if (enrollmentProgressText) {
+        enrollmentProgressText.textContent = `${count} / ${target}`;
+      }
+      if (!enrollmentProgressCircle || enrollmentProgressCircumference === 0) return;
+      const safeCount = Math.min(count, target);
+      const progress = target > 0 ? safeCount / target : 0;
+      enrollmentProgressCircle.style.strokeDashoffset =
+        enrollmentProgressCircumference * (1 - progress);
+    }
+
+    function resetEnrollmentProgress() {
+      setEnrollmentProgress(0, ENROLL_TARGET);
+    }
+
+    function updateEnrollmentButtonState() {
+      if (!startEnrollmentBtn) return;
+      if (window._enrollmentActive) {
+        startEnrollmentBtn.disabled = true;
+        startEnrollmentBtn.textContent = startEnrollmentBtn.dataset.enrollingText || 'Enrolling...';
+        return;
+      }
+      startEnrollmentBtn.disabled = false;
+      const ready = window.ws && window.ws.readyState === 1;
+      startEnrollmentBtn.textContent = ready
+        ? startEnrollmentBtn.dataset.defaultText || 'Start Enrollment'
+        : startEnrollmentBtn.dataset.waitingText || 'Waiting for connection';
+    }
+
+    function setWebRtcReady(state) {
+      webRtcReady = Boolean(state);
+      updateEnrollmentButtonState();
+    }
+
+    function setDataChannelReady(state) {
+      dataChannelReady = Boolean(state);
+      updateEnrollmentButtonState();
+    }
+
+    async function ensureEnrollmentConnection() {
+      if (enrollmentChannelPromise) return enrollmentChannelPromise;
+      enrollmentChannelPromise = (async () => {
+        try {
+          await startWebRTC('test', null, { skipOverlay: true, ignoreRemoteTrack: true });
+        } finally {
+          enrollmentChannelPromise = null;
+        }
+      })();
+      return enrollmentChannelPromise;
+    }
+
+    function startCameraRetryCountdown(seconds) {
+      stopCameraRetryCountdown();
+      const timerEl = document.getElementById('cameraRetryTimer');
+      if (!timerEl || seconds <= 0) return;
+      let remaining = seconds;
+      timerEl.textContent = `Retrying in ${remaining}s`;
+      cameraRetryIntervalId = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          stopCameraRetryCountdown();
+          return;
+        }
+        timerEl.textContent = `Retrying in ${remaining}s`;
+      }, 1000);
+    }
+
+    function stopCameraRetryCountdown() {
+      if (cameraRetryIntervalId) {
+        clearInterval(cameraRetryIntervalId);
+        cameraRetryIntervalId = null;
+      }
+      const timerEl = document.getElementById('cameraRetryTimer');
+      if (timerEl) {
+        timerEl.textContent = '';
+      }
+    }
+
+    function applyVideoBitrateLimit(maxBitrate = VIDEO_TRACK_BITRATE) {
+      if (!pc || typeof pc.getSenders !== 'function') return;
+      pc.getSenders().forEach(sender => {
+        if (!sender.track || sender.track.kind !== 'video') return;
+        const params = sender.getParameters ? sender.getParameters() : null;
+        if (!params) return;
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings = params.encodings.map(enc => {
+          const updated = Object.assign({}, enc);
+          updated.maxBitrate = maxBitrate;
+          return updated;
+        });
+        sender.setParameters(params).catch(e => {
+          console.warn('Failed to apply bitrate limit', e);
+        });
+      });
+    }
+
+    function stopEnrollmentFrameLoop() {
+      if (window._enrollInterval) {
+        clearInterval(window._enrollInterval);
+        window._enrollInterval = null;
+      }
+    }
+
+    function processServerAlert(data) {
+      if (!data) return;
+      const event = (data.event || data.message || '').toString();
+      if (!event) return;
+      if (!guidanceAlertReceived) {
+        guidanceAlertReceived = true;
+        setGuidanceMessage('Follow instructions');
+      }
+
+      const progressMatch = event.match(/Good face captured \((\d+)\/(\d+)\)/i);
+      if (progressMatch) {
+        const current = Number(progressMatch[1]);
+        const total = Number(progressMatch[2]);
+        setEnrollmentProgress(current, total);
+        if (Number.isFinite(current) && Number.isFinite(total) && current >= total) {
+          const statusEl = document.getElementById('enrollmentStatus');
+          if (statusEl) statusEl.textContent = 'Processing…';
+        }
+        return;
+      }
+
+      if (/^enrollment complete/i.test(event)) {
+        setGuidanceMessage(event);
+        const statusEl = document.getElementById('enrollmentStatus');
+        if (statusEl) statusEl.textContent = event;
+        stopEnrollmentFrameLoop();
+        cancelEnrollment();
+        return;
+      }
+
+      const normalized = event.toLowerCase();
+      const guidanceKeywords = [
+        'move closer',
+        'move slightly back',
+        'hold still',
+        'turn head left',
+        'turn head right',
+        'turn head slightly left',
+        'turn head slightly right',
+        'move face into frame',
+        'move your face into frame'
+      ];
+
+      if (guidanceKeywords.some(keyword => normalized.includes(keyword))) {
+        setGuidanceMessage(event);
+        return;
+      }
+
+      if (event === 'READY_FOR_FACE_ENROLLMENT') {
+        setGuidanceMessage('Ready for enrollment');
+      }
+    }
+
+    function shouldDisplayAlert(data) {
+      // While Add Face is open, only show enrollment-related alerts.
+      if (!_enrollmentOpen) return true;
+      const event = (data && (data.event || data.message) ? String(data.event || data.message) : '').toLowerCase();
+      if (!event) return false;
+
+      if (event === 'ready_for_face_enrollment') return true;
+      if (event.startsWith('enrollment complete')) return true;
+      if (event.includes('good face captured')) return true;
+
+      const allowKeywords = [
+        'move closer',
+        'move slightly back',
+        'hold still',
+        'turn head',
+        'move face into frame',
+        'move your face into frame'
+      ];
+      return allowKeywords.some(k => event.includes(k));
+    }
+
+    if (startEnrollmentBtn) {
+      startEnrollmentBtn.dataset.defaultText =
+        startEnrollmentBtn.textContent.trim() || 'Start Enrollment';
+      startEnrollmentBtn.dataset.waitingText = 'Waiting for connection';
+      startEnrollmentBtn.disabled = true;
+    }
+
+    if (enrollmentProgressCircle && enrollmentProgressCircumference) {
+      enrollmentProgressCircle.style.strokeDasharray = enrollmentProgressCircumference;
+      enrollmentProgressCircle.style.strokeDashoffset = enrollmentProgressCircumference;
+    }
+
+    resetEnrollmentProgress();
+    setGuidanceMessage();
+
+    // ROI canvases
+    const roiCanvas = document.getElementById("roiCanvas");
+    const roiDisplayCanvas = document.getElementById("roiDisplayCanvas");
+    const ctx = roiCanvas.getContext("2d");
+    const displayCtx = roiDisplayCanvas.getContext("2d");
+
+    let pmRunning = false;
+    let testRunning = false;
+    let selectedCameraId = 1;
+    let activeCctvCameraId = null;
+    let inFocusMode = false;
+
+    // ------------------ Rules UI ------------------
+    const rulesCameraSelect = document.getElementById('rulesCameraSelect');
+    const rulesActiveEl = document.getElementById('rulesActive');
+    const rulesStartEl = document.getElementById('rulesStart');
+    const rulesEndEl = document.getElementById('rulesEnd');
+    const rulesDaysEl = document.getElementById('rulesDays');
+    const rulesMaxPeopleEnabledEl = document.getElementById('rulesMaxPeopleEnabled');
+    const rulesMaxPeopleValueEl = document.getElementById('rulesMaxPeopleValue');
+    const rulesUnknownEnabledEl = document.getElementById('rulesUnknownEnabled');
+    const rulesRoiEnabledEl = document.getElementById('rulesRoiEnabled');
+    const rulesLinesEnabledEl = document.getElementById('rulesLinesEnabled');
+    const rulesVehicleEnabledEl = document.getElementById('rulesVehicleEnabled');
+    const rulesVehicleEntryEl = document.getElementById('rulesVehicleEntry');
+    const rulesVehicleExitEl = document.getElementById('rulesVehicleExit');
+    const rulesVehicleClassesEl = document.getElementById('rulesVehicleClasses');
+    const rulesParkingEnabledEl = document.getElementById('rulesParkingEnabled');
+    const rulesStatusEl = document.getElementById('rulesStatus');
+    const roiZoneListEl = document.getElementById('roiZoneList');
+    const lineListEl = document.getElementById('lineList');
+    const parkingZoneListEl = document.getElementById('parkingZoneList');
+    const addRoiZoneBtn = document.getElementById('addRoiZone');
+    const addLineBtn = document.getElementById('addLine');
+    const addParkingZoneBtn = document.getElementById('addParkingZone');
+    const loadRulesBtn = document.getElementById('loadRulesBtn');
+    const saveRulesBtn = document.getElementById('saveRulesBtn');
+
+    // Focus rules UI
+    const focusRulesPanel = document.getElementById('focusRulesPanel');
+    const focusRulesCameraLabel = document.getElementById('focusRulesCameraLabel');
+    const focusRulesLoadBtn = document.getElementById('focusRulesLoad');
+    const focusRulesSaveBtn = document.getElementById('focusRulesSave');
+    const focusRulesClearBtn = document.getElementById('focusRulesClear');
+    const focusRulesSyncBtn = document.getElementById('focusRulesSync');
+    const focusTabs = Array.from(document.querySelectorAll('.focus-tab'));
+    const focusTabContents = Array.from(document.querySelectorAll('.focus-rules-content'));
+    const focusRoiEnabledEl = document.getElementById('focusRoiEnabled');
+    const focusLinesEnabledEl = document.getElementById('focusLinesEnabled');
+    const focusParkingEnabledEl = document.getElementById('focusParkingEnabled');
+    const focusAddZoneBtn = document.getElementById('focusAddZone');
+    const focusAddLineBtn = document.getElementById('focusAddLine');
+    const focusAddParkingBtn = document.getElementById('focusAddParking');
+    const focusZoneListEl = document.getElementById('focusZoneList');
+    const focusLineListEl = document.getElementById('focusLineList');
+    const focusParkingListEl = document.getElementById('focusParkingList');
+    const focusUnknownEnabledEl = document.getElementById('focusUnknownEnabled');
+    const focusMaxPeopleEnabledEl = document.getElementById('focusMaxPeopleEnabled');
+    const focusMaxPeopleValueEl = document.getElementById('focusMaxPeopleValue');
+    const focusRulesActiveEl = document.getElementById('focusRulesActive');
+    const focusRulesStartEl = document.getElementById('focusRulesStart');
+    const focusRulesEndEl = document.getElementById('focusRulesEnd');
+    const focusRulesDaysEl = document.getElementById('focusRulesDays');
+    const focusCameraProfileEl = document.getElementById('focusCameraProfile');
+
+    const zoneModal = document.getElementById('zoneRulesModal');
+    const zoneModalTitle = document.getElementById('zoneModalTitle');
+    const zoneModalName = document.getElementById('zoneModalName');
+    const zoneModalClasses = document.getElementById('zoneModalClasses');
+    const zoneModalEnabled = document.getElementById('zoneModalEnabled');
+    const zoneModalVisible = document.getElementById('zoneModalVisible');
+    const zoneModalRoiOptions = document.getElementById('zoneModalRoiOptions');
+    const zoneModalPersonEntry = document.getElementById('zoneModalPersonEntry');
+    const zoneModalUnknown = document.getElementById('zoneModalUnknown');
+    const zoneModalCrowd = document.getElementById('zoneModalCrowd');
+    const zoneModalCrowdValue = document.getElementById('zoneModalCrowdValue');
+    const zoneModalExtra = document.getElementById('zoneModalExtra');
+    const zoneModalCancel = document.getElementById('zoneModalCancel');
+    const zoneModalSave = document.getElementById('zoneModalSave');
+
+    function setRulesStatus(message, isError = false) {
+      if (!rulesStatusEl) return;
+      rulesStatusEl.textContent = message || '';
+      rulesStatusEl.style.color = isError ? '#ff6b6b' : '#9fd2a6';
+    }
+
+    function clamp01(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 0;
+      return Math.max(0, Math.min(1, num));
+    }
+
+    function parseClassList(value) {
+      return String(value || '')
+        .split(',')
+        .map(v => v.trim())
+        .filter(Boolean);
+    }
+
+    function createRoiZoneItem(zone = {}) {
+      const item = document.createElement('div');
+      item.className = 'rules-item';
+      const pointsText = JSON.stringify(zone.points || []);
+      item.innerHTML = `
+        <div class="rules-row">
+          <label>ID</label>
+          <input type="text" class="roi-id" value="${zone.id || ''}" />
+          <label>Classes</label>
+          <input type="text" class="roi-classes" value="${(zone.classes || []).join(',')}" placeholder="person" />
+          <button class="roi-draw" style="background:#1e7e34;color:#fff;">Draw</button>
+          <button class="roi-clear" style="background:#444;color:#fff;">Clear</button>
+          <button class="remove-item" style="background:#333;color:#fff;">Remove</button>
+        </div>
+        <div class="rules-row">
+          <label style="width:100%;">Points</label>
+          <textarea class="roi-points">${pointsText}</textarea>
+        </div>
+      `;
+      item.querySelector('.roi-draw')?.addEventListener('click', () => startPolygonEdit(item));
+      item.querySelector('.roi-clear')?.addEventListener('click', () => {
+        const pointsEl = item.querySelector('.roi-points');
+        if (pointsEl) pointsEl.value = '[]';
+      });
+      item.querySelector('.remove-item').addEventListener('click', () => item.remove());
+      return item;
+    }
+
+    function createLineItem(line = {}) {
+      const item = document.createElement('div');
+      item.className = 'rules-item';
+      const p1 = line.p1 || [0.1, 0.5];
+      const p2 = line.p2 || [0.9, 0.5];
+      item.innerHTML = `
+        <div class="rules-row">
+          <label>ID</label>
+          <input type="text" class="line-id" value="${line.id || ''}" />
+          <label>Dir</label>
+          <select class="line-direction">
+            <option value="both">both</option>
+            <option value="a->b">a->b</option>
+            <option value="b->a">b->a</option>
+          </select>
+          <button class="remove-item" style="background:#333;color:#fff;">Remove</button>
+        </div>
+        <div class="rules-row">
+          <label>P1</label>
+          <input type="number" step="0.01" class="line-p1x" value="${p1[0]}" style="width:80px;" />
+          <input type="number" step="0.01" class="line-p1y" value="${p1[1]}" style="width:80px;" />
+          <label>P2</label>
+          <input type="number" step="0.01" class="line-p2x" value="${p2[0]}" style="width:80px;" />
+          <input type="number" step="0.01" class="line-p2y" value="${p2[1]}" style="width:80px;" />
+        </div>
+        <div class="rules-row">
+          <label>Classes</label>
+          <input type="text" class="line-classes" value="${(line.classes || []).join(',')}" placeholder="person,car" style="flex:1;" />
+        </div>
+      `;
+      const dirSelect = item.querySelector('.line-direction');
+      if (dirSelect) dirSelect.value = line.direction || 'both';
+      item.querySelector('.remove-item').addEventListener('click', () => item.remove());
+      return item;
+    }
+
+    function createParkingZoneItem(zone = {}) {
+      const item = document.createElement('div');
+      item.className = 'rules-item';
+      const pointsText = JSON.stringify(zone.points || []);
+      item.innerHTML = `
+        <div class="rules-row">
+          <label>ID</label>
+          <input type="text" class="park-id" value="${zone.id || ''}" />
+          <label>Max sec</label>
+          <input type="number" min="1" class="park-max" value="${zone.max_seconds || 600}" style="width:120px;" />
+          <button class="remove-item" style="background:#333;color:#fff;">Remove</button>
+        </div>
+        <div class="rules-row">
+          <label>Classes</label>
+          <input type="text" class="park-classes" value="${(zone.classes || []).join(',')}" placeholder="car,truck" style="flex:1;" />
+        </div>
+        <div class="rules-row">
+          <label style="width:100%;">Points</label>
+          <textarea class="park-points">${pointsText}</textarea>
+        </div>
+      `;
+      item.querySelector('.remove-item').addEventListener('click', () => item.remove());
+      return item;
+    }
+
+    function clearRulesList(listEl) {
+      if (!listEl) return;
+      while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+    }
+
+    function getSelectedDays() {
+      if (!rulesDaysEl) return [0, 1, 2, 3, 4, 5, 6];
+      const days = [];
+      rulesDaysEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        if (cb.checked) days.push(Number(cb.dataset.day));
+      });
+      return days;
+    }
+
+    function setSelectedDays(days) {
+      if (!rulesDaysEl) return;
+      const daySet = new Set(days || []);
+      rulesDaysEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = daySet.has(Number(cb.dataset.day));
+      });
+    }
+
+    function readRoiZones() {
+      const zones = [];
+      if (!roiZoneListEl) return zones;
+      roiZoneListEl.querySelectorAll('.rules-item').forEach(item => {
+        const id = item.querySelector('.roi-id')?.value || '';
+        const classes = parseClassList(item.querySelector('.roi-classes')?.value);
+        const pointsText = item.querySelector('.roi-points')?.value || '[]';
+        let points = [];
+        try {
+          points = JSON.parse(pointsText);
+        } catch (e) {
+          throw new Error('Invalid ROI points JSON');
+        }
+        points = (points || []).map(p => [clamp01(p[0]), clamp01(p[1])]);
+        zones.push({ id, points, classes });
+      });
+      return zones;
+    }
+
+    function readLines() {
+      const lines = [];
+      if (!lineListEl) return lines;
+      lineListEl.querySelectorAll('.rules-item').forEach(item => {
+        const id = item.querySelector('.line-id')?.value || '';
+        const direction = item.querySelector('.line-direction')?.value || 'both';
+        const p1 = [
+          clamp01(item.querySelector('.line-p1x')?.value),
+          clamp01(item.querySelector('.line-p1y')?.value)
+        ];
+        const p2 = [
+          clamp01(item.querySelector('.line-p2x')?.value),
+          clamp01(item.querySelector('.line-p2y')?.value)
+        ];
+        const classes = parseClassList(item.querySelector('.line-classes')?.value);
+        lines.push({ id, p1, p2, direction, classes });
+      });
+      return lines;
+    }
+
+    function readParkingZones() {
+      const zones = [];
+      if (!parkingZoneListEl) return zones;
+      parkingZoneListEl.querySelectorAll('.rules-item').forEach(item => {
+        const id = item.querySelector('.park-id')?.value || '';
+        const maxSeconds = Number(item.querySelector('.park-max')?.value || 600);
+        const classes = parseClassList(item.querySelector('.park-classes')?.value);
+        const pointsText = item.querySelector('.park-points')?.value || '[]';
+        let points = [];
+        try {
+          points = JSON.parse(pointsText);
+        } catch (e) {
+          throw new Error('Invalid parking points JSON');
+        }
+        points = (points || []).map(p => [clamp01(p[0]), clamp01(p[1])]);
+        zones.push({ id, points, classes, max_seconds: Math.max(1, Math.floor(maxSeconds || 1)) });
+      });
+      return zones;
+    }
+
+    function buildRulesPayload() {
+      const activeHours = [{
+        days: getSelectedDays(),
+        start: rulesStartEl?.value || '00:00',
+        end: rulesEndEl?.value || '23:59'
+      }];
+
+      return {
+        active: Boolean(rulesActiveEl?.checked),
+        active_hours: activeHours,
+        max_people: {
+          enabled: Boolean(rulesMaxPeopleEnabledEl?.checked),
+          value: Number(rulesMaxPeopleValueEl?.value || 0)
+        },
+        roi_intrusion: {
+          enabled: Boolean(rulesRoiEnabledEl?.checked),
+          zones: readRoiZones()
+        },
+        virtual_lines: {
+          enabled: Boolean(rulesLinesEnabledEl?.checked),
+          lines: readLines()
+        },
+        unknown_person: {
+          enabled: Boolean(rulesUnknownEnabledEl?.checked)
+        },
+        vehicle_rules: {
+          enabled: Boolean(rulesVehicleEnabledEl?.checked),
+          entry_line_id: rulesVehicleEntryEl?.value || 'entry',
+          exit_line_id: rulesVehicleExitEl?.value || 'exit',
+          classes: parseClassList(rulesVehicleClassesEl?.value)
+        },
+        parking_rules: {
+          enabled: Boolean(rulesParkingEnabledEl?.checked),
+          zones: readParkingZones()
+        }
+      };
+    }
+
+    function populateRulesUI(rules = {}) {
+      rulesActiveEl.checked = Boolean(rules.active);
+      const window0 = (rules.active_hours && rules.active_hours[0]) || { days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' };
+      rulesStartEl.value = window0.start || '00:00';
+      rulesEndEl.value = window0.end || '23:59';
+      setSelectedDays(window0.days || [0, 1, 2, 3, 4, 5, 6]);
+
+      rulesMaxPeopleEnabledEl.checked = Boolean(rules.max_people?.enabled);
+      rulesMaxPeopleValueEl.value = Number(rules.max_people?.value || 0);
+
+      rulesUnknownEnabledEl.checked = Boolean(rules.unknown_person?.enabled);
+
+      rulesRoiEnabledEl.checked = Boolean(rules.roi_intrusion?.enabled);
+      clearRulesList(roiZoneListEl);
+      (rules.roi_intrusion?.zones || []).forEach(zone => roiZoneListEl.appendChild(createRoiZoneItem(zone)));
+
+      rulesLinesEnabledEl.checked = Boolean(rules.virtual_lines?.enabled);
+      clearRulesList(lineListEl);
+      (rules.virtual_lines?.lines || []).forEach(line => lineListEl.appendChild(createLineItem(line)));
+
+      rulesVehicleEnabledEl.checked = Boolean(rules.vehicle_rules?.enabled);
+      rulesVehicleEntryEl.value = rules.vehicle_rules?.entry_line_id || 'entry';
+      rulesVehicleExitEl.value = rules.vehicle_rules?.exit_line_id || 'exit';
+      rulesVehicleClassesEl.value = (rules.vehicle_rules?.classes || []).join(',');
+
+      rulesParkingEnabledEl.checked = Boolean(rules.parking_rules?.enabled);
+      clearRulesList(parkingZoneListEl);
+      (rules.parking_rules?.zones || []).forEach(zone => parkingZoneListEl.appendChild(createParkingZoneItem(zone)));
+    }
+
+    async function loadRules() {
+      if (!rulesCameraSelect) return;
+      const cameraId = rulesCameraSelect.value || 'device';
+      try {
+        setRulesStatus('Loading...');
+        const resp = await apiFetch(`/rules?camera_id=${encodeURIComponent(cameraId)}`);
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          setRulesStatus(`Load failed: ${resp.status} ${text}`, true);
+          return;
+        }
+        const data = await resp.json();
+        const rules = data && data.rules ? data.rules : data;
+        populateRulesUI(rules || {});
+        setRulesStatus('Rules loaded');
+      } catch (e) {
+        setRulesStatus(`Load error: ${e && e.message ? e.message : e}`, true);
+      }
+    }
+
+    async function saveRules() {
+      if (!rulesCameraSelect) return;
+      const cameraId = rulesCameraSelect.value || 'device';
+      let payload = null;
+      try {
+        payload = buildRulesPayload();
+      } catch (e) {
+        setRulesStatus(e.message || 'Invalid rules input', true);
+        return;
+      }
+      try {
+        setRulesStatus('Saving...');
+        const resp = await apiFetch('/rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ camera_id: cameraId, rules: payload })
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          setRulesStatus(`Save failed: ${resp.status} ${text}`, true);
+          return;
+        }
+        setRulesStatus('Rules saved');
+      } catch (e) {
+        setRulesStatus(`Save error: ${e && e.message ? e.message : e}`, true);
+      }
+    }
+
+    function initRulesUI() {
+      if (!rulesCameraSelect) return;
+      rulesCameraSelect.innerHTML = '';
+      const deviceOpt = document.createElement('option');
+      deviceOpt.value = 'device';
+      deviceOpt.textContent = 'Device';
+      rulesCameraSelect.appendChild(deviceOpt);
+      [1, 2, 3, 4].forEach(id => {
+        const opt = document.createElement('option');
+        opt.value = String(id);
+        opt.textContent = `Camera ${id}`;
+        rulesCameraSelect.appendChild(opt);
+      });
+      rulesCameraSelect.value = String(selectedCameraId || 1);
+
+      addRoiZoneBtn?.addEventListener('click', () => {
+        roiZoneListEl.appendChild(createRoiZoneItem({ id: `roi${roiZoneListEl.children.length + 1}`, classes: ['person'], points: [] }));
+      });
+      addLineBtn?.addEventListener('click', () => {
+        lineListEl.appendChild(createLineItem({ id: `line${lineListEl.children.length + 1}`, direction: 'both', classes: ['person'], p1: [0.1, 0.5], p2: [0.9, 0.5] }));
+      });
+      addParkingZoneBtn?.addEventListener('click', () => {
+        parkingZoneListEl.appendChild(createParkingZoneItem({ id: `park${parkingZoneListEl.children.length + 1}`, classes: ['car'], points: [], max_seconds: 600 }));
+      });
+
+      loadRulesBtn?.addEventListener('click', () => loadRules());
+      saveRulesBtn?.addEventListener('click', () => saveRules());
+      rulesCameraSelect.addEventListener('change', () => loadRules());
+
+      loadRules();
+    }
+
+    // ------------------ Focus Rules Editor ------------------
+    const rulesDraftByCamera = new Map();
+    let currentRulesDraft = null;
+    let currentRulesCamera = 'device';
+    let hoveredOverlay = null;
+    const profileByCamera = new Map();
+
+    const PROFILE_SECTIONS = {
+      office: { zones: true, lines: true, parking: false, people: true, schedule: true },
+      parking: { zones: true, lines: true, parking: true, people: true, schedule: true },
+      home: { zones: true, lines: false, parking: false, people: true, schedule: true },
+      public: { zones: true, lines: true, parking: false, people: true, schedule: true }
+    };
+
+    function rulesCacheKey(cameraId) {
+      return `camera_rules_cache_${cameraId || 'device'}`;
+    }
+
+    function saveRulesCache(cameraId, draft) {
+      try {
+        const key = rulesCacheKey(cameraId);
+        localStorage.setItem(key, JSON.stringify(draft || {}));
+      } catch (e) {
+        console.warn('Rules cache save failed', e);
+      }
+    }
+
+    function loadRulesCache(cameraId) {
+      try {
+        const key = rulesCacheKey(cameraId);
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (e) {
+        console.warn('Rules cache load failed', e);
+        return null;
+      }
+    }
+
+    function clearRulesCache(cameraId) {
+      try {
+        const key = rulesCacheKey(cameraId);
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.warn('Rules cache clear failed', e);
+      }
+    }
+
+    function mergeUiFlags(targetZones, cachedZones) {
+      if (!Array.isArray(targetZones) || !Array.isArray(cachedZones)) return;
+      const map = new Map(cachedZones.map(z => [z.id, z]));
+      targetZones.forEach(zone => {
+        const cached = map.get(zone.id);
+        if (!cached) return;
+        if (cached._enabled !== undefined) zone._enabled = cached._enabled;
+        if (cached._visible !== undefined) zone._visible = cached._visible;
+      });
+    }
+
+    function getCameraProfileKey(cameraId) {
+      return `camera_profile_${cameraId || 'device'}`;
+    }
+
+    function loadCameraProfile(cameraId) {
+      const key = cameraId || 'device';
+      if (profileByCamera.has(key)) return profileByCamera.get(key);
+      const stored = localStorage.getItem(getCameraProfileKey(key));
+      const profile = stored && PROFILE_SECTIONS[stored] ? stored : 'office';
+      profileByCamera.set(key, profile);
+      return profile;
+    }
+
+    function saveCameraProfile(cameraId, profile) {
+      const key = cameraId || 'device';
+      profileByCamera.set(key, profile);
+      localStorage.setItem(getCameraProfileKey(key), profile);
+    }
+
+    function applyProfileToTabs(profile) {
+      const allowed = PROFILE_SECTIONS[profile] || PROFILE_SECTIONS.office;
+      focusTabs.forEach(tab => {
+        const tabKey = tab.dataset.tab;
+        const isAllowed = Boolean(allowed[tabKey]);
+        tab.style.display = isAllowed ? 'inline-flex' : 'none';
+      });
+      focusTabContents.forEach(content => {
+        const key = content.id.replace('focusTab-', '');
+        const isAllowed = Boolean(allowed[key]);
+        content.style.display = isAllowed ? '' : 'none';
+        content.classList.toggle('active', isAllowed && content.classList.contains('active'));
+      });
+      if (!focusTabs.some(t => t.classList.contains('active') && t.style.display !== 'none')) {
+        const firstVisible = focusTabs.find(t => t.style.display !== 'none');
+        if (firstVisible) firstVisible.click();
+      }
+    }
+
+    function focusGetSelectedDays() {
+      if (!focusRulesDaysEl) return [0, 1, 2, 3, 4, 5, 6];
+      const days = [];
+      focusRulesDaysEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        if (cb.checked) days.push(Number(cb.dataset.day));
+      });
+      return days;
+    }
+
+    function focusSetSelectedDays(days) {
+      if (!focusRulesDaysEl) return;
+      const daySet = new Set(days || []);
+      focusRulesDaysEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = daySet.has(Number(cb.dataset.day));
+      });
+    }
+
+    function defaultRulesDraft() {
+      return {
+        active: true,
+        active_hours: [{ days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' }],
+        max_people: { enabled: false, value: 5 },
+        roi_intrusion: { enabled: false, zones: [] },
+        virtual_lines: { enabled: false, lines: [] },
+        unknown_person: { enabled: false },
+        vehicle_rules: { enabled: false, entry_line_id: 'entry', exit_line_id: 'exit', classes: ['car', 'truck', 'bus', 'motorcycle'] },
+        parking_rules: { enabled: false, zones: [] }
+      };
+    }
+
+    function cloneRules(rules) {
+      return JSON.parse(JSON.stringify(rules || defaultRulesDraft()));
+    }
+
+    function ensureZoneFlags(zones) {
+      (zones || []).forEach(z => {
+        if (z._enabled === undefined) z._enabled = true;
+        if (z._visible === undefined) z._visible = true;
+      });
+    }
+
+    function ensureRulesDraft(cameraId, rules) {
+      const key = cameraId || 'device';
+      const draft = cloneRules(rules || defaultRulesDraft());
+      draft.roi_intrusion = draft.roi_intrusion || { enabled: false, zones: [] };
+      draft.virtual_lines = draft.virtual_lines || { enabled: false, lines: [] };
+      draft.parking_rules = draft.parking_rules || { enabled: false, zones: [] };
+      draft.max_people = draft.max_people || { enabled: false, value: 5 };
+      draft.unknown_person = draft.unknown_person || { enabled: false };
+      draft.active_hours = draft.active_hours && draft.active_hours.length ? draft.active_hours : [{ days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' }];
+      ensureZoneFlags(draft.roi_intrusion.zones);
+      ensureZoneFlags(draft.parking_rules.zones);
+      rulesDraftByCamera.set(key, draft);
+      return draft;
+    }
+
+    async function loadFocusRules(cameraId) {
+      const camKey = cameraId || 'device';
+      currentRulesCamera = camKey;
+      if (focusRulesCameraLabel) focusRulesCameraLabel.textContent = camKey === 'device' ? 'Device' : `Camera ${camKey}`;
+      const profile = loadCameraProfile(camKey);
+      if (focusCameraProfileEl) focusCameraProfileEl.value = profile;
+      applyProfileToTabs(profile);
+      // Clear overlay while switching cameras to avoid cross-camera bleed
+      currentRulesDraft = null;
+      displayCtx.clearRect(0, 0, roiDisplayCanvas.width, roiDisplayCanvas.height);
+      try {
+        const resp = await apiFetch(`/rules?camera_id=${encodeURIComponent(camKey)}`);
+        if (!resp.ok) throw new Error(`Load failed ${resp.status}`);
+        const data = await resp.json();
+        const rules = data && data.rules ? data.rules : data;
+        const cached = loadRulesCache(camKey);
+        currentRulesDraft = ensureRulesDraft(camKey, rules || {});
+        if (cached) {
+          mergeUiFlags(currentRulesDraft.roi_intrusion?.zones, cached.roi_intrusion?.zones);
+          mergeUiFlags(currentRulesDraft.parking_rules?.zones, cached.parking_rules?.zones);
+        }
+        saveRulesCache(camKey, currentRulesDraft);
+      } catch (e) {
+        const cached = loadRulesCache(camKey);
+        currentRulesDraft = ensureRulesDraft(camKey, cached || rulesDraftByCamera.get(camKey) || {});
+        addAlert('SYSTEM', `Rules load failed: ${e && e.message ? e.message : e}`);
+      }
+      renderFocusRules();
+    }
+
+    function buildFocusRulesPayload() {
+      if (!currentRulesDraft) return defaultRulesDraft();
+      const payload = cloneRules(currentRulesDraft);
+      payload.active = Boolean(focusRulesActiveEl?.checked);
+      payload.active_hours = [{ days: focusGetSelectedDays(), start: focusRulesStartEl?.value || '00:00', end: focusRulesEndEl?.value || '23:59' }];
+      payload.max_people = {
+        enabled: Boolean(focusMaxPeopleEnabledEl?.checked),
+        value: Number(focusMaxPeopleValueEl?.value || 0)
+      };
+      payload.unknown_person = { enabled: Boolean(focusUnknownEnabledEl?.checked) };
+      payload.roi_intrusion = payload.roi_intrusion || { enabled: false, zones: [] };
+      payload.virtual_lines = payload.virtual_lines || { enabled: false, lines: [] };
+      payload.parking_rules = payload.parking_rules || { enabled: false, zones: [] };
+      payload.roi_intrusion.enabled = Boolean(focusRoiEnabledEl?.checked);
+      payload.virtual_lines.enabled = Boolean(focusLinesEnabledEl?.checked);
+      payload.parking_rules.enabled = Boolean(focusParkingEnabledEl?.checked);
+
+      payload.roi_intrusion.zones = (payload.roi_intrusion.zones || []).filter(z => z._enabled !== false).map(z => ({
+        id: z.id,
+        points: z.points || [],
+        classes: z.classes || []
+      }));
+      payload.parking_rules.zones = (payload.parking_rules.zones || []).filter(z => z._enabled !== false).map(z => ({
+        id: z.id,
+        points: z.points || [],
+        classes: z.classes || [],
+        max_seconds: Number(z.max_seconds || 600)
+      }));
+      payload.virtual_lines.lines = (payload.virtual_lines.lines || []).map(l => ({
+        id: l.id,
+        p1: l.p1 || [0.1, 0.5],
+        p2: l.p2 || [0.9, 0.5],
+        direction: l.direction || 'both',
+        classes: l.classes || []
+      }));
+      return payload;
+    }
+
+    async function saveFocusRules() {
+      if (polygonEditing) {
+        finishPolygonEdit(true);
+      }
+      if (lineEditing) {
+        finishLineEdit(true);
+      }
+      const camKey = currentRulesCamera || 'device';
+      const payload = buildFocusRulesPayload();
+      try {
+        const resp = await apiFetch('/rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ camera_id: camKey, rules: payload })
+        });
+        if (!resp.ok) throw new Error(`Save failed ${resp.status}`);
+        currentRulesDraft = ensureRulesDraft(camKey, payload);
+        saveRulesCache(camKey, currentRulesDraft);
+        addAlert('SYSTEM', 'Rules saved');
+      } catch (e) {
+        saveRulesCache(camKey, currentRulesDraft || payload);
+        addAlert('SYSTEM', `Rules save failed: ${e && e.message ? e.message : e}`);
+      }
+    }
+
+    async function clearFocusZones() {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.roi_intrusion.zones = [];
+      currentRulesDraft.parking_rules.zones = [];
+      renderFocusRules();
+      cacheDraft();
+      await saveFocusRules();
+      addAlert('SYSTEM', 'Zones cleared for this camera');
+    }
+
+    async function syncFocusRules() {
+      const camKey = currentRulesCamera || selectedCameraId || 'device';
+      clearRulesCache(camKey);
+      await loadFocusRules(camKey);
+      addAlert('SYSTEM', 'Synced rules from server');
+    }
+
+    function renderFocusRules() {
+      if (!currentRulesDraft) return;
+      const rules = currentRulesDraft;
+      focusRulesActiveEl.checked = Boolean(rules.active);
+      const win0 = (rules.active_hours && rules.active_hours[0]) || { days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' };
+      focusRulesStartEl.value = win0.start || '00:00';
+      focusRulesEndEl.value = win0.end || '23:59';
+      focusSetSelectedDays(win0.days || [0, 1, 2, 3, 4, 5, 6]);
+
+      focusRoiEnabledEl.checked = Boolean(rules.roi_intrusion?.enabled);
+      focusLinesEnabledEl.checked = Boolean(rules.virtual_lines?.enabled);
+      focusParkingEnabledEl.checked = Boolean(rules.parking_rules?.enabled);
+
+      focusUnknownEnabledEl.checked = Boolean(rules.unknown_person?.enabled);
+      focusMaxPeopleEnabledEl.checked = Boolean(rules.max_people?.enabled);
+      focusMaxPeopleValueEl.value = Number(rules.max_people?.value || 0);
+
+      renderZoneList();
+      renderLineList();
+      renderParkingList();
+      drawRulesOverlay();
+      saveRulesCache(currentRulesCamera || 'device', currentRulesDraft);
+    }
+
+    function cacheDraft() {
+      if (!currentRulesDraft) return;
+      saveRulesCache(currentRulesCamera || 'device', currentRulesDraft);
+    }
+
+    function clearList(listEl) {
+      if (!listEl) return;
+      while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+    }
+
+    function renderZoneList() {
+      clearList(focusZoneListEl);
+      const zones = currentRulesDraft?.roi_intrusion?.zones || [];
+      ensureZoneFlags(zones);
+      zones.forEach((zone, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'rules-chip';
+        chip.innerHTML = `
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" ${zone._enabled === false ? '' : 'checked'} />
+          </label>
+          <label style="display:flex; align-items:center; gap:4px; color:#9aa0a6; font-size:12px;">
+            <input type="checkbox" ${zone._visible === false ? '' : 'checked'} /> Show
+          </label>
+          <input type="text" value="${zone.id || `Zone ${idx + 1}`}" />
+          <span style="color:#9aa0a6;">${(zone.classes || []).join(',') || 'person'}</span>
+          <div class="chip-actions">
+            <button class="primary">Edit</button>
+            <button class="danger">Delete</button>
+          </div>
+        `;
+        const toggle = chip.querySelectorAll('input[type="checkbox"]')[0];
+        const showToggle = chip.querySelectorAll('input[type="checkbox"]')[1];
+        const nameInput = chip.querySelector('input[type="text"]');
+        const editBtn = chip.querySelector('button.primary');
+        const delBtn = chip.querySelector('button.danger');
+        toggle.addEventListener('change', () => {
+          zone._enabled = toggle.checked;
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        showToggle.addEventListener('change', () => {
+          zone._visible = showToggle.checked;
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        nameInput.addEventListener('change', () => {
+          zone.id = nameInput.value || `Zone ${idx + 1}`;
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        editBtn.addEventListener('click', () => openZoneModal(zone, 'roi'));
+        delBtn.addEventListener('click', () => {
+          zones.splice(idx, 1);
+          renderZoneList();
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        chip.addEventListener('mouseenter', () => {
+          hoveredOverlay = { type: 'roi', id: zone.id };
+          drawRulesOverlay();
+        });
+        chip.addEventListener('mouseleave', () => {
+          hoveredOverlay = null;
+          drawRulesOverlay();
+        });
+        focusZoneListEl.appendChild(chip);
+      });
+    }
+
+    function renderLineList() {
+      clearList(focusLineListEl);
+      const lines = currentRulesDraft?.virtual_lines?.lines || [];
+      lines.forEach((line, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'rules-chip';
+        chip.innerHTML = `
+          <input type="text" value="${line.id || `Line ${idx + 1}`}" />
+          <select>
+            <option value="both">both</option>
+            <option value="a->b">a→b</option>
+            <option value="b->a">b→a</option>
+          </select>
+          <input type="text" value="${(line.classes || []).join(',') || 'person'}" />
+          <div class="chip-actions">
+            <button class="primary">Edit</button>
+            <button class="danger">Delete</button>
+          </div>
+        `;
+        const nameInput = chip.querySelector('input[type="text"]');
+        const dirSelect = chip.querySelector('select');
+        const classInput = chip.querySelectorAll('input[type="text"]')[1];
+        const editBtn = chip.querySelector('button.primary');
+        const delBtn = chip.querySelector('button.danger');
+        nameInput.addEventListener('change', () => {
+          line.id = nameInput.value || `Line ${idx + 1}`;
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        dirSelect.value = line.direction || 'both';
+        dirSelect.addEventListener('change', () => {
+          line.direction = dirSelect.value;
+          cacheDraft();
+        });
+        classInput.addEventListener('change', () => {
+          line.classes = parseClassList(classInput.value);
+          cacheDraft();
+        });
+        editBtn.addEventListener('click', () => openLineEditor(line));
+        delBtn.addEventListener('click', () => {
+          lines.splice(idx, 1);
+          renderLineList();
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        chip.addEventListener('mouseenter', () => {
+          hoveredOverlay = { type: 'line', id: line.id };
+          drawRulesOverlay();
+        });
+        chip.addEventListener('mouseleave', () => {
+          hoveredOverlay = null;
+          drawRulesOverlay();
+        });
+        focusLineListEl.appendChild(chip);
+      });
+    }
+
+    function renderParkingList() {
+      clearList(focusParkingListEl);
+      const zones = currentRulesDraft?.parking_rules?.zones || [];
+      ensureZoneFlags(zones);
+      zones.forEach((zone, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'rules-chip';
+        chip.innerHTML = `
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" ${zone._enabled === false ? '' : 'checked'} />
+          </label>
+          <label style="display:flex; align-items:center; gap:4px; color:#9aa0a6; font-size:12px;">
+            <input type="checkbox" ${zone._visible === false ? '' : 'checked'} /> Show
+          </label>
+          <input type="text" value="${zone.id || `Park ${idx + 1}`}" />
+          <span style="color:#9aa0a6;">${(zone.classes || []).join(',') || 'car'}</span>
+          <div class="chip-actions">
+            <button class="primary">Edit</button>
+            <button class="danger">Delete</button>
+          </div>
+        `;
+        const toggle = chip.querySelectorAll('input[type="checkbox"]')[0];
+        const showToggle = chip.querySelectorAll('input[type="checkbox"]')[1];
+        const nameInput = chip.querySelector('input[type="text"]');
+        const editBtn = chip.querySelector('button.primary');
+        const delBtn = chip.querySelector('button.danger');
+        toggle.addEventListener('change', () => {
+          zone._enabled = toggle.checked;
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        showToggle.addEventListener('change', () => {
+          zone._visible = showToggle.checked;
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        nameInput.addEventListener('change', () => {
+          zone.id = nameInput.value || `Park ${idx + 1}`;
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        editBtn.addEventListener('click', () => openZoneModal(zone, 'parking'));
+        delBtn.addEventListener('click', () => {
+          zones.splice(idx, 1);
+          renderParkingList();
+          drawRulesOverlay();
+          cacheDraft();
+        });
+        chip.addEventListener('mouseenter', () => {
+          hoveredOverlay = { type: 'parking', id: zone.id };
+          drawRulesOverlay();
+        });
+        chip.addEventListener('mouseleave', () => {
+          hoveredOverlay = null;
+          drawRulesOverlay();
+        });
+        focusParkingListEl.appendChild(chip);
+      });
+    }
+
+    function openZoneModal(zone, type) {
+      if (!zoneModal) return;
+      zoneModalTitle.textContent = type === 'parking' ? 'Parking Zone' : 'ROI Zone';
+      zoneModalName.value = zone.id || '';
+      zoneModalClasses.value = (zone.classes || []).join(',');
+      zoneModalEnabled.checked = zone._enabled !== false;
+      zoneModalVisible.checked = zone._visible !== false;
+      if (type === 'roi') {
+        zoneModalRoiOptions.style.display = 'block';
+        zoneModalExtra.style.display = 'none';
+        zoneModalPersonEntry.checked = (zone.classes || []).includes('person');
+        zoneModalUnknown.checked = Boolean(currentRulesDraft?.unknown_person?.enabled);
+        zoneModalCrowd.checked = Boolean(currentRulesDraft?.max_people?.enabled);
+        zoneModalCrowdValue.value = Number(currentRulesDraft?.max_people?.value || 5);
+      }
+      if (type === 'parking') {
+        zoneModalRoiOptions.style.display = 'none';
+        zoneModalExtra.style.display = 'none';
+      } else {
+        zoneModalExtra.style.display = 'none';
+      }
+      zoneModal.style.display = 'flex';
+      zoneModalCancel.onclick = () => { zoneModal.style.display = 'none'; };
+      zoneModalSave.onclick = () => {
+        zone.id = zoneModalName.value || zone.id || (type === 'parking' ? 'Park' : 'Zone');
+        zone.classes = parseClassList(zoneModalClasses.value);
+        zone._enabled = zoneModalEnabled.checked;
+        zone._visible = zoneModalVisible.checked;
+        if (type === 'roi') {
+          if (zoneModalPersonEntry.checked && !zone.classes.includes('person')) {
+            zone.classes.push('person');
+          }
+          if (!zoneModalPersonEntry.checked) {
+            zone.classes = zone.classes.filter(c => c !== 'person');
+          }
+          if (currentRulesDraft) {
+            currentRulesDraft.unknown_person.enabled = zoneModalUnknown.checked;
+            currentRulesDraft.max_people.enabled = zoneModalCrowd.checked;
+            currentRulesDraft.max_people.value = Number(zoneModalCrowdValue.value || 0);
+          }
+        }
+        zoneModal.style.display = 'none';
+        renderFocusRules();
+      };
+    }
+
+    function openLineEditor(line) {
+      lineEditing = true;
+      lineEditTarget = line;
+      lineEditIsNew = false;
+      lineEditTarget.__new = false;
+      linePoints = [
+        { x: clamp01(line.p1?.[0] ?? 0.1) * (roiCanvas.width || 1), y: clamp01(line.p1?.[1] ?? 0.5) * (roiCanvas.height || 1) },
+        { x: clamp01(line.p2?.[0] ?? 0.9) * (roiCanvas.width || 1), y: clamp01(line.p2?.[1] ?? 0.5) * (roiCanvas.height || 1) }
+      ];
+      attachCanvasesToActiveTile();
+      positionCanvases();
+      roiCanvas.style.display = 'block';
+      roiCanvas.style.pointerEvents = 'auto';
+      const saveBtn = document.getElementById('saveROI');
+      const cancelBtn = document.getElementById('cancelROI');
+      if (saveBtn) {
+        saveBtn.textContent = 'Save Line';
+        saveBtn.style.display = 'inline-block';
+      }
+      if (cancelBtn) {
+        cancelBtn.textContent = 'Cancel Line';
+        cancelBtn.style.display = 'inline-block';
+      }
+      addAlert('SYSTEM', 'Line editor: drag endpoints to adjust. Click Save when done.');
+      drawLineEditor();
+    }
+
+    function finishLineEdit(save) {
+      if (!lineEditing) return;
+      if (save && lineEditTarget) {
+        if (linePoints.length === 1) {
+          linePoints.push(_roiClampPoint({ x: linePoints[0].x + 80, y: linePoints[0].y }));
+        }
+        if (linePoints.length === 0) {
+          linePoints = [_roiClampPoint({ x: 80, y: 80 }), _roiClampPoint({ x: 200, y: 120 })];
+        }
+        if (lineEditTarget.__new && currentRulesDraft?.virtual_lines?.lines) {
+          const newLine = {
+            id: `line${(currentRulesDraft.virtual_lines.lines.length || 0) + 1}`,
+            p1: [0.1, 0.5],
+            p2: [0.9, 0.5],
+            direction: 'both',
+            classes: ['person']
+          };
+          currentRulesDraft.virtual_lines.lines.push(newLine);
+          lineEditTarget = newLine;
+        }
+        const W = roiCanvas.width || 1;
+        const H = roiCanvas.height || 1;
+        lineEditTarget.p1 = [clamp01(linePoints[0].x / W), clamp01(linePoints[0].y / H)];
+        lineEditTarget.p2 = [clamp01(linePoints[1].x / W), clamp01(linePoints[1].y / H)];
+      } else if (!save && lineEditIsNew && lineEditTarget && currentRulesDraft?.virtual_lines?.lines) {
+        const idx = currentRulesDraft.virtual_lines.lines.indexOf(lineEditTarget);
+        if (idx >= 0) currentRulesDraft.virtual_lines.lines.splice(idx, 1);
+        renderLineList();
+      }
+      lineEditing = false;
+      lineEditTarget = null;
+      linePoints = [];
+      lineDragMode = null;
+      lineActiveHandle = null;
+      lineEditIsNew = false;
+      ctx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+      roiCanvas.style.display = 'none';
+      roiCanvas.style.pointerEvents = 'none';
+      const saveBtn = document.getElementById('saveROI');
+      const cancelBtn = document.getElementById('cancelROI');
+      if (saveBtn) {
+        saveBtn.textContent = 'Save';
+        saveBtn.style.display = 'none';
+      }
+      if (cancelBtn) {
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.display = 'none';
+      }
+      drawRulesOverlay();
+      if (save) {
+        saveRules().catch(e => console.warn('auto-save rules failed', e));
+      }
+    }
+
+    function startAddZone() {
+      if (!currentRulesDraft) {
+        loadFocusRules(currentRulesCamera || selectedCameraId || 'device').then(() => startAddZone());
+        return;
+      }
+      const profile = loadCameraProfile(currentRulesCamera || selectedCameraId || 'device');
+      if (!PROFILE_SECTIONS[profile]?.zones) {
+        addAlert('SYSTEM', 'Zones are disabled for this camera profile.');
+        return;
+      }
+      if (polygonEditing || lineEditing) {
+        addAlert('SYSTEM', 'Finish current edit first.');
+        return;
+      }
+      const newZone = { id: `Zone ${currentRulesDraft.roi_intrusion.zones.length + 1}`, points: [], classes: ['person'], _enabled: true };
+      newZone._visible = true;
+      startPolygonEdit({
+        type: 'roi',
+        points: [],
+        onSave: points => {
+          newZone.points = points;
+          currentRulesDraft.roi_intrusion.zones.push(newZone);
+          renderZoneList();
+          drawRulesOverlay();
+          openZoneModal(newZone, 'roi');
+        },
+        onCancel: () => { }
+      });
+    }
+
+    function startAddParkingZone() {
+      if (!currentRulesDraft) {
+        loadFocusRules(currentRulesCamera || selectedCameraId || 'device').then(() => startAddParkingZone());
+        return;
+      }
+      const profile = loadCameraProfile(currentRulesCamera || selectedCameraId || 'device');
+      if (!PROFILE_SECTIONS[profile]?.parking) {
+        addAlert('SYSTEM', 'Parking rules are disabled for this camera profile.');
+        return;
+      }
+      if (polygonEditing || lineEditing) {
+        addAlert('SYSTEM', 'Finish current edit first.');
+        return;
+      }
+      const newZone = { id: `Park ${currentRulesDraft.parking_rules.zones.length + 1}`, points: [], classes: ['car'], max_seconds: 600, _enabled: true };
+      newZone._visible = true;
+      startPolygonEdit({
+        type: 'parking',
+        points: [],
+        onSave: points => {
+          newZone.points = points;
+          currentRulesDraft.parking_rules.zones.push(newZone);
+          renderParkingList();
+          drawRulesOverlay();
+          openZoneModal(newZone, 'parking');
+        },
+        onCancel: () => { }
+      });
+    }
+
+    function startAddLine() {
+      if (!currentRulesDraft) {
+        loadFocusRules(currentRulesCamera || selectedCameraId || 'device').then(() => startAddLine());
+        return;
+      }
+      const profile = loadCameraProfile(currentRulesCamera || selectedCameraId || 'device');
+      if (!PROFILE_SECTIONS[profile]?.lines) {
+        addAlert('SYSTEM', 'Lines are disabled for this camera profile.');
+        return;
+      }
+      if (polygonEditing || lineEditing) {
+        addAlert('SYSTEM', 'Finish current edit first.');
+        return;
+      }
+      lineEditing = true;
+      lineEditTarget = { __new: true };
+      lineEditIsNew = true;
+      linePoints = [];
+      attachCanvasesToActiveTile();
+      positionCanvases();
+      roiCanvas.style.display = 'block';
+      roiCanvas.style.pointerEvents = 'auto';
+      const saveBtn = document.getElementById('saveROI');
+      const cancelBtn = document.getElementById('cancelROI');
+      if (saveBtn) {
+        saveBtn.textContent = 'Save Line';
+        saveBtn.style.display = 'inline-block';
+      }
+      if (cancelBtn) {
+        cancelBtn.textContent = 'Cancel Line';
+        cancelBtn.style.display = 'inline-block';
+      }
+      addAlert('SYSTEM', 'Line: click two points on the video.');
+      drawLineEditor();
+    }
+
+    function drawRulesOverlay() {
+      if (!inFocusMode) return;
+      positionCanvases();
+      roiDisplayCanvas.style.display = 'block';
+      displayCtx.clearRect(0, 0, roiDisplayCanvas.width, roiDisplayCanvas.height);
+      if (!currentRulesDraft) return;
+      const W = roiDisplayCanvas.width || 1;
+      const H = roiDisplayCanvas.height || 1;
+
+      const drawPoly = (points, color, fillAlpha, highlight) => {
+        if (!points || points.length < 3) return;
+        displayCtx.beginPath();
+        displayCtx.moveTo(points[0][0] * W, points[0][1] * H);
+        for (let i = 1; i < points.length; i += 1) {
+          displayCtx.lineTo(points[i][0] * W, points[i][1] * H);
+        }
+        displayCtx.closePath();
+        displayCtx.fillStyle = highlight ? `rgba(255, 215, 0, ${fillAlpha})` : `rgba(${color.join(',')}, ${fillAlpha})`;
+        displayCtx.fill();
+        displayCtx.strokeStyle = highlight ? '#ffd700' : `rgb(${color.join(',')})`;
+        displayCtx.lineWidth = highlight ? 3 : 2;
+        displayCtx.stroke();
+      };
+
+      const drawLine = (p1, p2, highlight) => {
+        displayCtx.beginPath();
+        displayCtx.moveTo(p1[0] * W, p1[1] * H);
+        displayCtx.lineTo(p2[0] * W, p2[1] * H);
+        displayCtx.strokeStyle = highlight ? '#ffd700' : '#4cd137';
+        displayCtx.lineWidth = highlight ? 3 : 2;
+        displayCtx.stroke();
+        displayCtx.fillStyle = displayCtx.strokeStyle;
+        displayCtx.beginPath();
+        displayCtx.arc(p1[0] * W, p1[1] * H, 4, 0, Math.PI * 2);
+        displayCtx.fill();
+        displayCtx.beginPath();
+        displayCtx.arc(p2[0] * W, p2[1] * H, 4, 0, Math.PI * 2);
+        displayCtx.fill();
+      };
+
+      (currentRulesDraft.roi_intrusion?.zones || []).forEach(zone => {
+        if (zone._enabled === false || zone._visible === false) return;
+        const highlight = hoveredOverlay && hoveredOverlay.type === 'roi' && hoveredOverlay.id === zone.id;
+        drawPoly(zone.points || [], [76, 209, 55], 0.2, highlight);
+      });
+
+      (currentRulesDraft.parking_rules?.zones || []).forEach(zone => {
+        if (zone._enabled === false || zone._visible === false) return;
+        const highlight = hoveredOverlay && hoveredOverlay.type === 'parking' && hoveredOverlay.id === zone.id;
+        drawPoly(zone.points || [], [52, 152, 219], 0.2, highlight);
+      });
+
+      (currentRulesDraft.virtual_lines?.lines || []).forEach(line => {
+        const highlight = hoveredOverlay && hoveredOverlay.type === 'line' && hoveredOverlay.id === line.id;
+        const p1 = line.p1 || [0.1, 0.5];
+        const p2 = line.p2 || [0.9, 0.5];
+        drawLine(p1, p2, highlight);
+      });
+    }
+    let gridPeers = {};
+    let gridRunning = false;
+    let zoomLevel = 1;
+    let panX = 0;
+    let panY = 0;
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+
+    let roiEditing = false;
+    let roi = { x: 100, y: 100, w: 200, h: 150 };
+    let savedROI = null;
+    let roiBackup = null;
+
+    let polygonEditing = false;
+    let polygonDrawing = false;
+    let polygonPoints = [];
+    let polygonBackup = null;
+    let polygonZoneItem = null;
+    let polygonEditTarget = null;
+    let polygonEditType = null;
+    let polygonSaveCallback = null;
+    let polygonCancelCallback = null;
+    let polygonDragMode = null;
+    let polygonActiveVertex = -1;
+    let polygonResizeHandle = null;
+    let polygonDragStart = { x: 0, y: 0 };
+    let polygonBasePoints = [];
+    let polygonBaseBox = null;
+    let polygonLastMouse = null;
+
+    let lineEditing = false;
+    let linePoints = [];
+    let lineEditTarget = null;
+    let lineDragMode = null;
+    let lineActiveHandle = null;
+    let lineEditIsNew = false;
+
+    let dragging = false;
+    let resizing = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    function attachCanvasesToActiveTile() {
+      if (!activeTileEl) return;
+      if (roiCanvas.parentElement !== activeTileEl) {
+        activeTileEl.appendChild(roiCanvas);
+      }
+      if (roiDisplayCanvas.parentElement !== activeTileEl) {
+        activeTileEl.appendChild(roiDisplayCanvas);
+      }
+      positionCanvases();
+    }
+
+    function showGridUI() {
+      inFocusMode = false;
+      const grid = document.getElementById('cameraGrid');
+      if (grid) grid.style.display = 'grid';
+      if (focusContainerEl) focusContainerEl.style.display = 'none';
+      if (focusControlsEl) focusControlsEl.style.display = 'none';
+      if (alertsBoxEl) alertsBoxEl.style.display = 'none';
+      if (focusRulesPanel) focusRulesPanel.style.display = 'none';
+      roiCanvas.style.display = "none";
+      roiDisplayCanvas.style.display = "none";
+      pmRunning = false;
+      testRunning = false;
+      try {
+        const pmBtn = document.getElementById('pmBtn');
+        const testBtn = document.getElementById('testBtn');
+        if (pmBtn) {
+          pmBtn.textContent = 'Start Device Mode';
+          pmBtn.classList.remove('stop');
+          pmBtn.disabled = false;
+        }
+        if (testBtn) {
+          testBtn.textContent = 'Start CCTV Mode';
+          testBtn.classList.remove('stop');
+          testBtn.disabled = false;
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    function showFocusUI() {
+      inFocusMode = true;
+      const grid = document.getElementById('cameraGrid');
+      if (grid) grid.style.display = 'none';
+      if (focusContainerEl) focusContainerEl.style.display = 'block';
+      if (focusControlsEl) focusControlsEl.style.display = 'flex';
+      if (alertsBoxEl) alertsBoxEl.style.display = 'flex';
+      if (focusRulesPanel) focusRulesPanel.style.display = 'block';
+      activeVideoEl = focusVideoEl || activeVideoEl;
+      activeTileEl = focusContainerEl || activeTileEl;
+      attachCanvasesToActiveTile();
+      applyZoom();
+      roiDisplayCanvas.style.display = 'block';
+      drawRulesOverlay();
+      loadFocusRules(selectedCameraId || 'device');
+    }
+
+    function clampPan() {
+      if (!focusContainerEl) return;
+      const rect = focusContainerEl.getBoundingClientRect();
+      const maxX = Math.max(0, (zoomLevel - 1) * rect.width / 2);
+      const maxY = Math.max(0, (zoomLevel - 1) * rect.height / 2);
+      panX = Math.max(-maxX, Math.min(maxX, panX));
+      panY = Math.max(-maxY, Math.min(maxY, panY));
+    }
+
+    function applyZoom() {
+      if (!focusVideoEl) return;
+      clampPan();
+      focusVideoEl.style.transformOrigin = 'center center';
+      focusVideoEl.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+    }
+
+    function setSelectedCameraId(id) {
+      const nextId = Number(id) || 1;
+      selectedCameraId = nextId;
+      document.querySelectorAll('.camera-tile').forEach(tile => {
+        const tileId = Number(tile.dataset.cameraId || 0);
+        tile.classList.toggle('selected', tileId === nextId);
+      });
+      if (rulesCameraSelect && rulesCameraSelect.value !== 'device') {
+        rulesCameraSelect.value = String(nextId);
+      }
+      if (!inFocusMode) {
+        activeVideoEl = videoEls[nextId] || videoEls[1];
+        activeTileEl = document.querySelector(`.camera-tile[data-camera-id="${nextId}"]`) || activeTileEl;
+      }
+      if (inFocusMode) {
+        attachCanvasesToActiveTile();
+        loadFocusRules(nextId);
+      }
+    }
+
+    async function ensureCCTVForCamera(cameraId) {
+      setSelectedCameraId(cameraId);
+      if (_enrollmentOpen || window._enrollmentActive) {
+        addAlert('SYSTEM', 'Finish enrollment before switching modes.');
+        return;
+      }
+
+      if (testRunning && activeCctvCameraId === selectedCameraId) {
+        return;
+      }
+
+      const testBtn = document.getElementById("testBtn");
+      if (!testRunning) {
+        // Starting CCTV mode
+        if (testBtn) {
+          testBtn.textContent = "Stop CCTV Mode";
+          testBtn.classList.add("stop");
+        }
+        testRunning = true;
+        // Stop Device mode if it's running
+        if (pmRunning) {
+          const pmBtn = document.getElementById("pmBtn");
+          if (pmBtn) {
+            pmBtn.textContent = "Start Device Mode";
+            pmBtn.classList.remove("stop");
+          }
+          pmRunning = false;
+          stopAll({ resetModeButtons: false });
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        await startTestMode(selectedCameraId);
+        return;
+      }
+
+      // CCTV already running, restart with new camera
+      stopAll({ resetModeButtons: false });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await startTestMode(selectedCameraId);
+    }
+
+    async function startGridStream(cameraId) {
+      const pcGrid = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        bundlePolicy: "max-bundle",
+        rtcpMuxPolicy: "require",
+        sdpSemantics: "unified-plan",
+        encodedInsertableStreams: false
+      });
+
+      const tileVideo = videoEls[cameraId];
+      pcGrid.ontrack = (e) => {
+        if (tileVideo) {
+          tileVideo.srcObject = e.streams[0];
+        }
+      };
+
+      pcGrid.addTransceiver("video", { direction: "recvonly" });
+
+      const offer = await pcGrid.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: true });
+      await pcGrid.setLocalDescription(offer);
+
+      const resp = await apiFetch("/offer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sdp: pcGrid.localDescription.sdp,
+          type: pcGrid.localDescription.type,
+          mode: "grid",
+          source: "cctv",
+          cameraId: cameraId,
+          analysis: false
+        })
+      });
+
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        throw new Error(`Grid stream failed for camera ${cameraId}: ${errorText}`);
+      }
+
+      const answer = await resp.json();
+      await pcGrid.setRemoteDescription(answer);
+      gridPeers[cameraId] = pcGrid;
+    }
+
+    async function startGridView() {
+      if (gridRunning) return;
+      showGridUI();
+      gridRunning = true;
+      // Stop analytics stream if active
+      stopAnalytics();
+      const cameraIds = [1, 2, 3, 4];
+      for (const camId of cameraIds) {
+        try {
+          await startGridStream(camId);
+        } catch (e) {
+          console.error('Grid stream error', e);
+        }
+      }
+    }
+
+    function stopGridView() {
+      gridRunning = false;
+      Object.values(gridPeers).forEach(pcItem => {
+        try { pcItem.close(); } catch (e) { /* ignore */ }
+      });
+      gridPeers = {};
+      Object.values(videoEls).forEach(el => {
+        if (!el) return;
+        el.srcObject = null;
+      });
+    }
+
+    async function enterFocusView(cameraId) {
+      setSelectedCameraId(cameraId);
+      stopGridView();
+      showFocusUI();
+      const testBtn = document.getElementById("testBtn");
+      if (testBtn) {
+        testBtn.textContent = "Stop CCTV Mode";
+        testBtn.classList.add("stop");
+      }
+      testRunning = true;
+      await startTestMode(cameraId);
+    }
+
+    function stopAnalytics() {
+      if (pc) {
+        try { pc.close(); } catch (e) { /* ignore */ }
+      }
+      pc = null;
+      if (localStream) {
+        localStream.getTracks().forEach(t => { try { t.stop(); } catch (e) { /* ignore */ } });
+        localStream = null;
+      }
+      if (focusVideoEl) focusVideoEl.srcObject = null;
+    }
+
+    // Note: a unified addAlert is defined later; keep this placeholder removed to avoid
+    // duplicate definitions which caused `undefined` alert entries.
+    function connectWebSocket() {
+      if (!authToken) {
+        return;
+      }
+      const wsScheme = (window.location && window.location.protocol === 'https:') ? 'wss' : 'ws';
+      let wsHost = window.location.host || '';
+      if (wsHost.startsWith('0.0.0.0')) {
+        const host = window.location.hostname || 'localhost';
+        const port = window.location.port ? `:${window.location.port}` : '';
+        wsHost = `${host}${port}`;
+      }
+      if (!wsHost) {
+        wsHost = 'localhost:8000';
+      }
+      const tokenParam = encodeURIComponent(authToken);
+      const _ws = new WebSocket(wsScheme + '://' + wsHost + `/ws?token=${tokenParam}`);
+      // store on window for consistent access throughout the app
+      window.ws = _ws;
+      _ws.onopen = function () {
+        console.log('WebSocket connected');
+        updateEnrollmentButtonState();
+      };
+      _ws.onmessage = function (event) {
+        const data = JSON.parse(event.data);
+        handleMessage(data);
+      };
+      _ws.onclose = function () {
+        console.log('WebSocket closed, reconnecting...');
+        window.ws = null;
+        setTimeout(connectWebSocket, 1000);
+        updateEnrollmentButtonState();
+      };
+      _ws.onerror = function (error) {
+        console.error('WebSocket error:', error);
+        updateEnrollmentButtonState();
+      };
+    }
+
+    // ------------------ Camera selection ------------------
+    async function populateCameras() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        const sel = document.getElementById('cameraSelect');
+        if (!sel) return;
+        sel.innerHTML = '';
+        // Add a default option
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Default';
+        sel.appendChild(defaultOpt);
+        // If no devices found or labels are blank, prompt for permission briefly
+        if (videoDevices.length === 0 || videoDevices.every(d => !d.label)) {
+          try {
+            const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+            // stop tracks immediately
+            tmp.getTracks().forEach(t => t.stop());
+            // re-enumerate
+            const devices2 = await navigator.mediaDevices.enumerateDevices();
+            videoDevices.length = 0;
+            devices2.filter(d => d.kind === 'videoinput').forEach(d => videoDevices.push(d));
+          } catch (err) {
+            console.warn('Camera permission prompt declined or failed:', err);
+          }
+        }
+
+        videoDevices.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          // Prefer label when available (after permission)
+          opt.textContent = d.label || `Camera ${sel.length}`;
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('populateCameras error', e);
+      }
+    }
+
+    // Refresh camera list when devices change
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', populateCameras);
+    }
+
+    function bindCameraTiles() {
+      const tiles = document.querySelectorAll('.camera-tile');
+      tiles.forEach(tile => {
+        const id = Number(tile.dataset.cameraId || 1);
+        const activate = () => enterFocusView(id);
+        tile.addEventListener('click', activate);
+        tile.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            activate();
+          }
+        });
+      });
+    }
+
+    function bindCctvSelect() {
+      const sel = document.getElementById('cctvSelect');
+      if (!sel) return;
+      sel.value = String(selectedCameraId || 1);
+      sel.addEventListener('change', async () => {
+        const camId = Number(sel.value) || 1;
+        setSelectedCameraId(camId);
+        if (inFocusMode) {
+          await enterFocusView(camId);
+        }
+      });
+    }
+
+    // Determine video constraints using selected camera
+    function getVideoConstraints() {
+      const sel = document.getElementById('cameraSelect');
+      const deviceId = sel ? sel.value : '';
+      if (deviceId) {
+        return { video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+      }
+      return { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+    }
+
+    function handleMessage(data) {
+      if (data.action === 'list_faces') {
+        const faces = data.faces;
+        if (faces.length === 0) {
+          addAlert("SYSTEM", "No faces in database.");
+          return;
+        }
+        let message = "Enrolled Faces:\n\n";
+        faces.forEach((face, index) => {
+          message += `${index + 1}. ${face}\n`;
+        });
+        message += "\nEnter the name to delete (or cancel to close):";
+        const toDelete = prompt(message);
+        if (toDelete && faces.includes(toDelete)) {
+          if (confirm(`Delete face: ${toDelete}?`)) {
+            if (window.ws && window.ws.readyState === 1) {
+              window.ws.send(JSON.stringify({ action: "delete_face", name: toDelete }));
+            } else {
+              addAlert('SYSTEM', 'Not connected to server.');
+            }
+          }
+        }
+      } else if (data.action === 'delete_face') {
+        if (data.status === 'deleted') {
+          addAlert("SYSTEM", `Face deleted successfully!`);
+        } else {
+          addAlert("SYSTEM", "Failed to delete face: " + (data.error || "Unknown error"));
+        }
+      } else if (data.action === 'enroll_face') {
+
+        if (data.status === 'started') {
+          // ✅ enrollment has begun – NOT an error
+          document.getElementById('enrollmentStatus').textContent =
+            "Enrollment started… keep your face steady";
+          // mark enrollment active and disable mode switches
+          window._enrollmentActive = true;
+          try {
+            const pmBtn = document.getElementById('pmBtn');
+            const testBtn = document.getElementById('testBtn');
+            if (pmBtn) { pmBtn.disabled = true; }
+            if (testBtn) { testBtn.disabled = true; }
+          } catch (e) { /* ignore */ }
+          return;
+        }
+
+        if (data.status === 'progress') {
+          document.getElementById('enrollmentStatus').textContent = data.message;
+          return;
+        }
+
+        if (data.status === 'ok') {
+          stopEnrollmentFrameLoop();
+          addAlert("SYSTEM", "Face added successfully!");
+          // clear enrollment active flag and re-enable mode buttons
+          window._enrollmentActive = false;
+          try {
+            const pmBtn = document.getElementById('pmBtn');
+            const testBtn = document.getElementById('testBtn');
+            if (pmBtn) { pmBtn.disabled = false; }
+            if (testBtn) { testBtn.disabled = false; }
+          } catch (e) { /* ignore */ }
+          cancelEnrollment();
+          return;
+        }
+
+        // ❌ real failure
+        const reason = data.error || data.message || "Unknown error";
+        addAlert("SYSTEM", `Failed to add face: ${reason}`);
+        window._enrollmentActive = false;
+        try {
+          const pmBtn = document.getElementById('pmBtn');
+          const testBtn = document.getElementById('testBtn');
+          if (pmBtn) { pmBtn.disabled = false; }
+          if (testBtn) { testBtn.disabled = false; }
+        } catch (e) { /* ignore */ }
+        cancelEnrollment();
+      }
+    }
+
+
+    if (loginSubmitEl) {
+      loginSubmitEl.addEventListener('click', async () => {
+        const email = (loginEmailEl?.value || '').trim();
+        const password = loginPasswordEl?.value || '';
+        const role = (document.getElementById('loginRole')?.value || '').trim();
+        if (!role) {
+          showLoginOverlay('Role is required.');
+          return;
+        }
+        if (!email || !password) {
+          showLoginOverlay('Email and password required.');
+          return;
+        }
+        if (loginErrorEl) loginErrorEl.textContent = 'Signing in...';
+        try {
+          const resp = await fetch('/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, role })
+          });
+          if (!resp.ok) {
+            showLoginOverlay('Invalid credentials.');
+            return;
+          }
+          const data = await resp.json();
+          setAuthToken(data?.token || '');
+          if (!authToken) {
+            showLoginOverlay('Login failed.');
+            return;
+          }
+          await ensureAuth();
+        } catch (e) {
+          showLoginOverlay('Login failed.');
+        }
+      });
+    }
+
+    if (logoutBtnEl) {
+      logoutBtnEl.addEventListener('click', () => {
+        setAuthToken('');
+        currentUser = null;
+        currentRole = null;
+        setAuthBadge(null);
+        applyRoleUI(null);
+        try { stopAll({ resetModeButtons: true }); } catch (e) { /* ignore */ }
+        try { stopGridView(); } catch (e) { /* ignore */ }
+        try { showGridUI(); } catch (e) { /* ignore */ }
+        showLoginOverlay('Logged out. Please login.');
+      });
+    }
+
+    if (superAdminRefreshEl) {
+      superAdminRefreshEl.addEventListener('click', () => {
+        loadSuperAdminClients();
+      });
+    }
+
+    window.addEventListener('load', () => {
+      ensureAuth();
+    });
+
+    // ------------------ Position canvases to match container/video ------------------
+    function positionCanvases() {
+      const container = activeTileEl || document.querySelector('.camera-tile');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+
+      [roiCanvas, roiDisplayCanvas].forEach(cnv => {
+        cnv.width = rect.width;
+        cnv.height = rect.height;
+        cnv.style.width = rect.width + "px";
+        cnv.style.height = rect.height + "px";
+        cnv.style.top = "0px";
+        cnv.style.left = "0px";
+      });
+    }
+
+    function _roiPointDistance(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function _roiClampPoint(pt) {
+      return {
+        x: Math.max(0, Math.min(roiCanvas.width, pt.x)),
+        y: Math.max(0, Math.min(roiCanvas.height, pt.y))
+      };
+    }
+
+    function _roiBounds(points) {
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      return { minX, maxX, minY, maxY };
+    }
+
+    function _pointInPolygon(x, y, points) {
+      let inside = false;
+      for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+        const xi = points[i].x, yi = points[i].y;
+        const xj = points[j].x, yj = points[j].y;
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 1e-9) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function _findVertexIndex(mx, my, radius = 10) {
+      const p = { x: mx, y: my };
+      for (let i = 0; i < polygonPoints.length; i += 1) {
+        if (_roiPointDistance(polygonPoints[i], p) <= radius) return i;
+      }
+      return -1;
+    }
+
+    function _findResizeHandle(mx, my, box, radius = 10) {
+      if (!box) return null;
+      const handles = [
+        { name: 'tl', x: box.minX, y: box.minY },
+        { name: 'tr', x: box.maxX, y: box.minY },
+        { name: 'bl', x: box.minX, y: box.maxY },
+        { name: 'br', x: box.maxX, y: box.maxY }
+      ];
+      for (const h of handles) {
+        if (_roiPointDistance({ x: mx, y: my }, h) <= radius) return h.name;
+      }
+      return null;
+    }
+
+    function _findLineHandle(mx, my, radius = 10) {
+      if (!linePoints || linePoints.length < 2) return -1;
+      if (_roiPointDistance(linePoints[0], { x: mx, y: my }) <= radius) return 0;
+      if (_roiPointDistance(linePoints[1], { x: mx, y: my }) <= radius) return 1;
+      return -1;
+    }
+
+    function _scalePoints(points, oldBox, newBox) {
+      const oldW = Math.max(1, oldBox.maxX - oldBox.minX);
+      const oldH = Math.max(1, oldBox.maxY - oldBox.minY);
+      const newW = Math.max(1, newBox.maxX - newBox.minX);
+      const newH = Math.max(1, newBox.maxY - newBox.minY);
+      return points.map(p => {
+        const rx = (p.x - oldBox.minX) / oldW;
+        const ry = (p.y - oldBox.minY) / oldH;
+        return _roiClampPoint({
+          x: newBox.minX + rx * newW,
+          y: newBox.minY + ry * newH
+        });
+      });
+    }
+
+    function drawPolygonEditor() {
+      ctx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+
+      if (!polygonPoints.length) return;
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#4cd137';
+      ctx.fillStyle = 'rgba(76, 209, 55, 0.2)';
+
+      ctx.beginPath();
+      ctx.moveTo(polygonPoints[0].x, polygonPoints[0].y);
+      for (let i = 1; i < polygonPoints.length; i += 1) {
+        ctx.lineTo(polygonPoints[i].x, polygonPoints[i].y);
+      }
+      if (!polygonDrawing && polygonPoints.length >= 3) {
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.stroke();
+
+      if (polygonDrawing && polygonLastMouse) {
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        const last = polygonPoints[polygonPoints.length - 1];
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(polygonLastMouse.x, polygonLastMouse.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // points
+      ctx.fillStyle = '#4cd137';
+      polygonPoints.forEach((p, idx) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, idx === 0 ? 5 : 4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      if (!polygonDrawing && polygonPoints.length >= 2) {
+        const box = _roiBounds(polygonPoints);
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY);
+        ctx.setLineDash([]);
+
+        // resize handles
+        ctx.fillStyle = '#4cd137';
+        const handleSize = 8;
+        const corners = [
+          { x: box.minX, y: box.minY },
+          { x: box.maxX, y: box.minY },
+          { x: box.minX, y: box.maxY },
+          { x: box.maxX, y: box.maxY }
+        ];
+        corners.forEach(c => {
+          ctx.fillRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
+        });
+      }
+    }
+
+    function drawLineEditor() {
+      ctx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+      if (!linePoints.length) return;
+      ctx.strokeStyle = '#4cd137';
+      ctx.lineWidth = 2;
+      if (linePoints.length === 1) {
+        ctx.beginPath();
+        ctx.arc(linePoints[0].x, linePoints[0].y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#4cd137';
+        ctx.fill();
+        return;
+      }
+      ctx.beginPath();
+      ctx.moveTo(linePoints[0].x, linePoints[0].y);
+      ctx.lineTo(linePoints[1].x, linePoints[1].y);
+      ctx.stroke();
+
+      ctx.fillStyle = '#4cd137';
+      ctx.beginPath();
+      ctx.arc(linePoints[0].x, linePoints[0].y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(linePoints[1].x, linePoints[1].y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function startPolygonEdit(target) {
+      if (!inFocusMode) {
+        addAlert('SYSTEM', 'Select a camera to enter focus mode before editing ROI zones.');
+        return;
+      }
+      if (roiEditing) {
+        addAlert('SYSTEM', 'Finish rectangle ROI edit first.');
+        return;
+      }
+
+      polygonEditing = true;
+      polygonZoneItem = null;
+      polygonEditTarget = null;
+      polygonEditType = null;
+      polygonSaveCallback = null;
+      polygonCancelCallback = null;
+
+      if (target && target.nodeType) {
+        polygonZoneItem = target;
+        polygonBackup = target.querySelector('.roi-points')?.value || '[]';
+      } else if (target && typeof target === 'object') {
+        polygonEditTarget = target;
+        polygonEditType = target.type || 'roi';
+        polygonSaveCallback = typeof target.onSave === 'function' ? target.onSave : null;
+        polygonCancelCallback = typeof target.onCancel === 'function' ? target.onCancel : null;
+        polygonBackup = JSON.stringify(target.points || []);
+      } else {
+        polygonBackup = '[]';
+      }
+
+      polygonDrawing = false;
+      polygonDragMode = null;
+      polygonActiveVertex = -1;
+      polygonResizeHandle = null;
+      polygonLastMouse = null;
+
+      attachCanvasesToActiveTile();
+      positionCanvases();
+      roiCanvas.style.display = 'block';
+      roiCanvas.style.pointerEvents = 'auto';
+
+      const saveBtn = document.getElementById('saveROI');
+      const cancelBtn = document.getElementById('cancelROI');
+      if (saveBtn) {
+        saveBtn.textContent = 'Save Zone';
+        saveBtn.style.display = 'inline-block';
+      }
+      if (cancelBtn) {
+        cancelBtn.textContent = 'Cancel Zone';
+        cancelBtn.style.display = 'inline-block';
+      }
+
+      const W = roiCanvas.width || 1;
+      const H = roiCanvas.height || 1;
+      let points = [];
+      try {
+        const raw = JSON.parse(polygonBackup || '[]');
+        if (Array.isArray(raw)) points = raw;
+      } catch (e) {
+        points = [];
+      }
+      polygonPoints = (points || []).map(p => ({
+        x: clamp01(p[0]) * W,
+        y: clamp01(p[1]) * H
+      }));
+      polygonDrawing = polygonPoints.length < 3;
+      drawPolygonEditor();
+      addAlert('SYSTEM', 'ROI zone editor: click to add points, drag points or polygon, use corner handles to resize. Click near the first point to close.');
+    }
+
+    function finishPolygonEdit(save) {
+      if (!polygonEditing) return;
+      let normalized = null;
+      if (save) {
+        if (polygonPoints.length < 3) {
+          addAlert('SYSTEM', 'ROI zone needs at least 3 points.');
+          return;
+        }
+        const W = roiCanvas.width || 1;
+        const H = roiCanvas.height || 1;
+        normalized = polygonPoints.map(p => [clamp01(p.x / W), clamp01(p.y / H)]);
+      }
+
+      if (polygonZoneItem) {
+        const pointsEl = polygonZoneItem.querySelector('.roi-points');
+        if (save) {
+          if (pointsEl) pointsEl.value = JSON.stringify(normalized);
+          addAlert('SYSTEM', 'ROI zone saved.');
+        } else if (pointsEl) {
+          pointsEl.value = polygonBackup || '[]';
+          addAlert('SYSTEM', 'ROI zone edit cancelled.');
+        }
+      } else if (polygonSaveCallback) {
+        if (save) polygonSaveCallback(normalized || []);
+        else if (polygonCancelCallback) polygonCancelCallback();
+      }
+
+      polygonEditing = false;
+      polygonDrawing = false;
+      polygonPoints = [];
+      polygonBackup = null;
+      polygonZoneItem = null;
+      polygonEditTarget = null;
+      polygonEditType = null;
+      polygonSaveCallback = null;
+      polygonCancelCallback = null;
+      polygonDragMode = null;
+      polygonActiveVertex = -1;
+      polygonResizeHandle = null;
+      polygonLastMouse = null;
+
+      ctx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+      roiCanvas.style.display = 'none';
+      roiCanvas.style.pointerEvents = 'none';
+
+      const saveBtn = document.getElementById('saveROI');
+      const cancelBtn = document.getElementById('cancelROI');
+      if (saveBtn) {
+        saveBtn.textContent = 'Save';
+        saveBtn.style.display = 'none';
+      }
+      if (cancelBtn) {
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.display = 'none';
+      }
+      if (save) {
+        saveRules().catch(e => console.warn('auto-save rules failed', e));
+      }
+    }
+
+    // ------------------ Edit ROI ------------------
+    function editROI() {
+      if (!inFocusMode) {
+        addAlert('SYSTEM', 'Select a camera to enter focus mode before editing ROI.');
+        return;
+      }
+      startAddZone();
+    }
+
+    // ------------------ Draw green editable ROI ------------------
+    function drawEditorROI() {
+      ctx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+
+      ctx.strokeStyle = "#4cd137";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
+
+      // resize handle
+      ctx.fillStyle = "#4cd137";
+      ctx.fillRect(roi.x + roi.w - 12, roi.y + roi.h - 12, 12, 12);
+    }
+
+    // ------------------ Draw yellow saved ROI ------------------
+    function drawDisplayROI() {
+      if (!savedROI) {
+        roiDisplayCanvas.style.display = "none";
+        return;
+      }
+
+      positionCanvases();
+      displayCtx.clearRect(0, 0, roiDisplayCanvas.width, roiDisplayCanvas.height);
+
+      const W = roiDisplayCanvas.width;
+      const H = roiDisplayCanvas.height;
+      const x = savedROI.x * W;
+      const y = savedROI.y * H;
+      const w = savedROI.w * W;
+      const h = savedROI.h * H;
+
+      // Fill
+      displayCtx.fillStyle = "rgba(255, 255, 0, 0.25)";
+      displayCtx.fillRect(x, y, w, h);
+
+      // Border
+      displayCtx.strokeStyle = "yellow";
+      displayCtx.lineWidth = 3;
+      displayCtx.strokeRect(x, y, w, h);
+
+      // ROI box is intentionally shown without text to avoid overlaying information
+
+      roiDisplayCanvas.style.display = "block";
+
+      // Removed console log to avoid UI/console clutter
+    }
+
+    // ------------------ Save ROI ------------------
+    async function saveROI() {
+      try {
+        if (lineEditing) {
+          finishLineEdit(true);
+          return;
+        }
+        if (polygonEditing) {
+          finishPolygonEdit(true);
+          return;
+        }
+        if (!roiEditing) return;
+
+        positionCanvases();
+        const W = roiCanvas.width || 1;
+        const H = roiCanvas.height || 1;
+
+        const payload = {
+          x: Math.max(0, Math.min(1, roi.x / W)),
+          y: Math.max(0, Math.min(1, roi.y / H)),
+          w: Math.max(0, Math.min(1, roi.w / W)),
+          h: Math.max(0, Math.min(1, roi.h / H)),
+        };
+
+        const resp = await apiFetch("/save-roi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => "");
+          addAlert("SYSTEM", `ROI save failed: ${resp.status} ${text}`);
+          return;
+        }
+
+        savedROI = payload;
+        drawDisplayROI();
+        hideROIEditor();
+        addAlert("SYSTEM", "ROI saved");
+      } catch (e) {
+        console.error("saveROI error", e);
+        addAlert("SYSTEM", `ROI save error: ${e && e.message ? e.message : e}`);
+      }
+    }
+
+    function cancelROI() {
+      if (lineEditing) {
+        finishLineEdit(false);
+        return;
+      }
+      if (polygonEditing) {
+        finishPolygonEdit(false);
+        return;
+      }
+      // restore previous roi rectangle (pixels) if we have it
+      if (roiBackup) roi = { ...roiBackup };
+      hideROIEditor();
+      drawDisplayROI();
+      addAlert("SYSTEM", "ROI edit cancelled");
+    }
+    let _enrollmentOpen = false;
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function isCameraBusyError(err) {
+      const name = (err && err.name) ? String(err.name) : '';
+      const message = (err && err.message) ? String(err.message) : String(err || '');
+      return name === 'NotReadableError' ||
+        message.includes('NotReadableError') ||
+        message.includes('Could not start video source');
+    }
+
+    function isOverconstrainedError(err) {
+      const name = (err && err.name) ? String(err.name) : '';
+      return name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError';
+    }
+
+    async function requestEnrollmentStream(constraints) {
+      enrollmentStreamRetryActive = true;
+      let attempt = 0;
+      const maxAttempts = 60;
+      let currentConstraints = constraints || { video: true, audio: false };
+      while (enrollmentStreamRetryActive && attempt < maxAttempts) {
+        attempt += 1;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(currentConstraints);
+          enrollmentStreamRetryActive = false;
+          stopCameraRetryCountdown();
+          return stream;
+        } catch (err) {
+          if (!enrollmentStreamRetryActive) {
+            stopCameraRetryCountdown();
+            throw new Error('Camera request cancelled');
+          }
+
+          // If constraints are too strict (e.g., exact deviceId/resolution), fall back once.
+          if (isOverconstrainedError(err)) {
+            currentConstraints = { video: true, audio: false };
+            setGuidanceMessage('Camera constraints unsupported — retrying');
+            startCameraRetryCountdown(1);
+            await delay(1000);
+            continue;
+          }
+
+          // Common after switching modes: device still releasing.
+          if (isCameraBusyError(err) && attempt < maxAttempts) {
+            setGuidanceMessage('Camera busy — waiting for it to become available');
+            startCameraRetryCountdown(1);
+            await delay(1000);
+            continue;
+          }
+
+          enrollmentStreamRetryActive = false;
+          stopCameraRetryCountdown();
+          throw err;
+        }
+      }
+      const cancelled = !enrollmentStreamRetryActive;
+      enrollmentStreamRetryActive = false;
+      stopCameraRetryCountdown();
+      if (cancelled) throw new Error('Camera request cancelled');
+      throw new Error('Camera unavailable after waiting');
+    }
+
+    async function addFace() {
+      const btn = document.getElementById('addFaceBtn');
+      if (_enrollmentOpen) {
+        // act as Cancel
+        return cancelEnrollment();
+      }
+
+      // Stop detection stream
+      stopAll();
+      stopGridView();
+      showFocusUI();
+
+      // small pause to ensure camera device is released before reopening
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Show enrollment panel BELOW video
+      const enrollmentPanel = document.getElementById("faceEnrollment");
+      if (enrollmentPanel) {
+        enrollmentPanel.style.display = "flex";
+      }
+      document.getElementById("faceNameInput").focus();
+
+      // Update button to act as cancel (red)
+      btn.textContent = 'Cancel';
+      btn.classList.add('stop');
+      _enrollmentOpen = true;
+      applyRoleUI(currentRole);
+
+      // Enrollment UI is mutually exclusive with CCTV/Device modes.
+      try {
+        const pmBtn = document.getElementById('pmBtn');
+        const testBtn = document.getElementById('testBtn');
+        if (pmBtn) pmBtn.disabled = true;
+        if (testBtn) testBtn.disabled = true;
+      } catch (e) { /* ignore */ }
+
+      // Use selected camera device for enrollment
+      try {
+        const constraints = getVideoConstraints();
+        if (constraints && constraints.video) {
+          constraints.video.width = { ideal: 640 };
+          constraints.video.height = { ideal: 480 };
+        }
+        const stream = await requestEnrollmentStream(constraints);
+        if (activeVideoEl) {
+          activeVideoEl.srcObject = stream;
+          activeVideoEl.playbackRate = 1.0;
+          activeVideoEl.muted = true;
+          activeVideoEl.autoplay = true;
+          activeVideoEl.setAttribute("playsinline", "");
+          activeVideoEl.setAttribute("webkit-playsinline", "true");
+        }
+
+
+        // Start the enrollment guidance channel only after the local camera is available.
+        ensureEnrollmentConnection().catch(err => {
+          console.error('Enrollment data channel failed', err);
+          addAlert('SYSTEM', 'Enrollment guidance channel unavailable');
+        });
+      } catch (e) {
+        const msg = (e && e.message) ? String(e.message) : '';
+        if (msg.toLowerCase().includes('cancelled')) {
+          return;
+        }
+        // requestEnrollmentStream handles NotReadableError retries; avoid spamming errors.
+        if (isCameraBusyError(e)) {
+          setGuidanceMessage('Camera busy — waiting for it to become available');
+          return;
+        }
+        onCameraError(e);
+      }
+    }
+    function cancelEnrollment() {
+      stopAll();
+      const enrollmentPanel = document.getElementById("faceEnrollment");
+      if (enrollmentPanel) {
+        enrollmentPanel.style.display = "none";
+      }
+
+      window._enrollmentActive = false;
+
+      // Ensure mode buttons are usable after enrollment ends.
+      try {
+        const pmBtn = document.getElementById('pmBtn');
+        const testBtn = document.getElementById('testBtn');
+        if (pmBtn) pmBtn.disabled = false;
+        if (testBtn) testBtn.disabled = false;
+      } catch (e) { /* ignore */ }
+
+      if (activeVideoEl && activeVideoEl.srcObject) {
+        activeVideoEl.srcObject.getTracks().forEach(t => t.stop());
+        activeVideoEl.srcObject = null;
+      }
+
+      if (window._enrollInterval) {
+        clearInterval(window._enrollInterval);
+        window._enrollInterval = null;
+      }
+      if (window._enrollCanvas) {
+        window._enrollCanvas = null;
+        window._enrollCtx = null;
+      }
+
+      const nameInput = document.getElementById("faceNameInput");
+      if (nameInput) {
+        nameInput.value = "";
+      }
+
+      const statusEl = document.getElementById("enrollmentStatus");
+      if (statusEl) {
+        statusEl.textContent = "Position your face in the camera and click Start Enrollment";
+      }
+
+      resetEnrollmentProgress();
+      setGuidanceMessage();
+      updateEnrollmentButtonState();
+
+      const addBtn = document.getElementById('addFaceBtn');
+      if (addBtn) {
+        addBtn.textContent = 'Add Face';
+        addBtn.classList.remove('stop');
+      }
+      _enrollmentOpen = false;
+      applyRoleUI(currentRole);
+    }
+    hideROIEditor();
+
+
+    function onCameraError(err) {
+      if (suppressCameraErrors) {
+        console.log('Camera error suppressed', err);
+        return;
+      }
+      const message = err?.message || 'Camera access failed';
+      console.error('Camera error:', err);
+      addAlert('SYSTEM', `Camera error: ${message}`);
+      setGuidanceMessage('Camera error — waiting for you to reconnect');
+      const statusEl = document.getElementById('enrollmentStatus');
+      if (statusEl) {
+        statusEl.textContent = 'Camera error. Please check your device and try again.';
+      }
+      // Keep UI open so the user can retry without forcing a full restart.
+    }
+
+
+    // ------------------ Hide editor canvas ------------------
+    function hideROIEditor() {
+      roiEditing = false;
+      dragging = false;
+      resizing = false;
+
+      if (lineEditing) {
+        finishLineEdit(false);
+        return;
+      }
+
+      if (polygonEditing) {
+        finishPolygonEdit(false);
+        return;
+      }
+
+      roiCanvas.style.display = "none";
+      roiCanvas.style.pointerEvents = "none";
+
+      const saveBtn = document.getElementById("saveROI");
+      const cancelBtn = document.getElementById("cancelROI");
+      if (saveBtn) saveBtn.style.display = "none";
+      if (cancelBtn) cancelBtn.style.display = "none";
+    }
+
+    // ------------------ Mouse events for ROI editing ------------------
+    roiCanvas.onmousedown = e => {
+      if (lineEditing) {
+        const mx = e.offsetX, my = e.offsetY;
+        if (lineEditTarget && lineEditTarget.__new) {
+          linePoints.push(_roiClampPoint({ x: mx, y: my }));
+          if (linePoints.length === 2) {
+            const W = roiCanvas.width || 1;
+            const H = roiCanvas.height || 1;
+            const newLine = {
+              id: `line${(currentRulesDraft?.virtual_lines?.lines?.length || 0) + 1}`,
+              p1: [clamp01(linePoints[0].x / W), clamp01(linePoints[0].y / H)],
+              p2: [clamp01(linePoints[1].x / W), clamp01(linePoints[1].y / H)],
+              direction: 'both',
+              classes: ['person']
+            };
+            currentRulesDraft.virtual_lines.lines.push(newLine);
+            lineEditTarget = newLine;
+            addAlert('SYSTEM', 'Line created. Drag endpoints, then Save.');
+            renderLineList();
+            drawRulesOverlay();
+          }
+          drawLineEditor();
+          return;
+        }
+        const handleIdx = _findLineHandle(mx, my, 10);
+        if (handleIdx >= 0) {
+          lineDragMode = 'handle';
+          lineActiveHandle = handleIdx;
+          return;
+        }
+        return;
+      }
+      if (polygonEditing) {
+        const mx = e.offsetX, my = e.offsetY;
+        polygonLastMouse = { x: mx, y: my };
+
+        if (polygonDrawing) {
+          if (polygonPoints.length >= 3 && _roiPointDistance(polygonPoints[0], { x: mx, y: my }) <= 10) {
+            polygonDrawing = false;
+            drawPolygonEditor();
+            return;
+          }
+          polygonPoints.push(_roiClampPoint({ x: mx, y: my }));
+          drawPolygonEditor();
+          return;
+        }
+
+        const vertexIdx = _findVertexIndex(mx, my, 10);
+        if (vertexIdx >= 0) {
+          polygonDragMode = 'vertex';
+          polygonActiveVertex = vertexIdx;
+          return;
+        }
+
+        const box = polygonPoints.length >= 2 ? _roiBounds(polygonPoints) : null;
+        const handle = _findResizeHandle(mx, my, box, 12);
+        if (handle) {
+          polygonDragMode = 'resize';
+          polygonResizeHandle = handle;
+          polygonDragStart = { x: mx, y: my };
+          polygonBasePoints = polygonPoints.map(p => ({ ...p }));
+          polygonBaseBox = box;
+          return;
+        }
+
+        if (polygonPoints.length >= 3 && _pointInPolygon(mx, my, polygonPoints)) {
+          polygonDragMode = 'move';
+          polygonDragStart = { x: mx, y: my };
+          polygonBasePoints = polygonPoints.map(p => ({ ...p }));
+          return;
+        }
+        return;
+      }
+      if (!roiEditing) return;
+      const mx = e.offsetX, my = e.offsetY;
+
+      if (Math.abs(mx - (roi.x + roi.w)) < 15 && Math.abs(my - (roi.y + roi.h)) < 15) {
+        resizing = true;
+        return;
+      }
+
+      if (mx > roi.x && mx < roi.x + roi.w && my > roi.y && my < roi.y + roi.h) {
+        dragging = true;
+        offsetX = mx - roi.x;
+        offsetY = my - roi.y;
+      }
+    };
+
+    roiCanvas.onmousemove = e => {
+      if (lineEditing) {
+        const mx = e.offsetX, my = e.offsetY;
+        if (lineEditTarget && lineEditTarget.__new && linePoints.length === 1) {
+          linePoints[1] = _roiClampPoint({ x: mx, y: my });
+          drawLineEditor();
+          return;
+        }
+        if (lineDragMode === 'handle' && lineActiveHandle !== null) {
+          linePoints[lineActiveHandle] = _roiClampPoint({ x: mx, y: my });
+          drawLineEditor();
+          return;
+        }
+        return;
+      }
+      if (polygonEditing) {
+        const mx = e.offsetX, my = e.offsetY;
+        polygonLastMouse = { x: mx, y: my };
+
+        if (polygonDragMode === 'vertex' && polygonActiveVertex >= 0) {
+          polygonPoints[polygonActiveVertex] = _roiClampPoint({ x: mx, y: my });
+          drawPolygonEditor();
+          return;
+        }
+
+        if (polygonDragMode === 'move') {
+          const dx = mx - polygonDragStart.x;
+          const dy = my - polygonDragStart.y;
+          polygonPoints = polygonBasePoints.map(p => _roiClampPoint({ x: p.x + dx, y: p.y + dy }));
+          drawPolygonEditor();
+          return;
+        }
+
+        if (polygonDragMode === 'resize' && polygonBaseBox) {
+          const minSize = 20;
+          let newMinX = polygonBaseBox.minX;
+          let newMaxX = polygonBaseBox.maxX;
+          let newMinY = polygonBaseBox.minY;
+          let newMaxY = polygonBaseBox.maxY;
+
+          if (polygonResizeHandle.includes('l')) newMinX = Math.min(mx, polygonBaseBox.maxX - minSize);
+          if (polygonResizeHandle.includes('r')) newMaxX = Math.max(mx, polygonBaseBox.minX + minSize);
+          if (polygonResizeHandle.includes('t')) newMinY = Math.min(my, polygonBaseBox.maxY - minSize);
+          if (polygonResizeHandle.includes('b')) newMaxY = Math.max(my, polygonBaseBox.minY + minSize);
+
+          newMinX = Math.max(0, Math.min(newMinX, roiCanvas.width));
+          newMaxX = Math.max(0, Math.min(newMaxX, roiCanvas.width));
+          newMinY = Math.max(0, Math.min(newMinY, roiCanvas.height));
+          newMaxY = Math.max(0, Math.min(newMaxY, roiCanvas.height));
+
+          const newBox = { minX: Math.min(newMinX, newMaxX), maxX: Math.max(newMinX, newMaxX), minY: Math.min(newMinY, newMaxY), maxY: Math.max(newMinY, newMaxY) };
+          polygonPoints = _scalePoints(polygonBasePoints, polygonBaseBox, newBox);
+          drawPolygonEditor();
+          return;
+        }
+
+        if (polygonDrawing) {
+          drawPolygonEditor();
+          return;
+        }
+        return;
+      }
+      if (!roiEditing) return;
+      const mx = e.offsetX, my = e.offsetY;
+
+      if (resizing) {
+        roi.w = Math.max(20, mx - roi.x);
+        roi.h = Math.max(20, my - roi.y);
+        drawEditorROI();
+      }
+
+      if (dragging) {
+        roi.x = Math.max(0, Math.min(roi.x, roiCanvas.width));
+        roi.y = Math.max(0, Math.min(roi.y, roiCanvas.height));
+        roi.x = mx - offsetX;
+        roi.y = my - offsetY;
+        drawEditorROI();
+      }
+    };
+
+    roiCanvas.onmouseup = () => {
+      if (lineEditing) {
+        lineDragMode = null;
+        lineActiveHandle = null;
+        return;
+      }
+      if (polygonEditing) {
+        polygonDragMode = null;
+        polygonActiveVertex = -1;
+        polygonResizeHandle = null;
+        polygonBaseBox = null;
+        return;
+      }
+      dragging = false;
+      resizing = false;
+    };
+
+    roiCanvas.ondblclick = e => {
+      if (!polygonEditing || !polygonDrawing) return;
+      if (polygonPoints.length >= 3) {
+        polygonDrawing = false;
+        drawPolygonEditor();
+      }
+    };
+
+    // ------------------ Touch events for ROI editing (mobile) ------------------
+    roiCanvas.addEventListener("touchstart", e => {
+      if (lineEditing) {
+        e.preventDefault();
+        const rect = roiCanvas.getBoundingClientRect();
+        const t = e.touches[0];
+        const x = t.clientX - rect.left;
+        const y = t.clientY - rect.top;
+        if (lineEditTarget && lineEditTarget.__new) {
+          linePoints.push(_roiClampPoint({ x, y }));
+          if (linePoints.length === 2) {
+            const W = roiCanvas.width || 1;
+            const H = roiCanvas.height || 1;
+            const newLine = {
+              id: `line${(currentRulesDraft?.virtual_lines?.lines?.length || 0) + 1}`,
+              p1: [clamp01(linePoints[0].x / W), clamp01(linePoints[0].y / H)],
+              p2: [clamp01(linePoints[1].x / W), clamp01(linePoints[1].y / H)],
+              direction: 'both',
+              classes: ['person']
+            };
+            currentRulesDraft.virtual_lines.lines.push(newLine);
+            lineEditTarget = newLine;
+            addAlert('SYSTEM', 'Line created. Drag endpoints, then Save.');
+            renderLineList();
+            drawRulesOverlay();
+          }
+          drawLineEditor();
+          return;
+        }
+        const handleIdx = _findLineHandle(x, y, 12);
+        if (handleIdx >= 0) {
+          lineDragMode = 'handle';
+          lineActiveHandle = handleIdx;
+          return;
+        }
+        return;
+      }
+      if (polygonEditing) {
+        e.preventDefault();
+        const rect = roiCanvas.getBoundingClientRect();
+        const t = e.touches[0];
+        const x = t.clientX - rect.left;
+        const y = t.clientY - rect.top;
+        polygonLastMouse = { x, y };
+
+        if (polygonDrawing) {
+          if (polygonPoints.length >= 3 && _roiPointDistance(polygonPoints[0], { x, y }) <= 12) {
+            polygonDrawing = false;
+            drawPolygonEditor();
+            return;
+          }
+          polygonPoints.push(_roiClampPoint({ x, y }));
+          drawPolygonEditor();
+          return;
+        }
+
+        const vertexIdx = _findVertexIndex(x, y, 12);
+        if (vertexIdx >= 0) {
+          polygonDragMode = 'vertex';
+          polygonActiveVertex = vertexIdx;
+          return;
+        }
+
+        const box = polygonPoints.length >= 2 ? _roiBounds(polygonPoints) : null;
+        const handle = _findResizeHandle(x, y, box, 14);
+        if (handle) {
+          polygonDragMode = 'resize';
+          polygonResizeHandle = handle;
+          polygonDragStart = { x, y };
+          polygonBasePoints = polygonPoints.map(p => ({ ...p }));
+          polygonBaseBox = box;
+          return;
+        }
+
+        if (polygonPoints.length >= 3 && _pointInPolygon(x, y, polygonPoints)) {
+          polygonDragMode = 'move';
+          polygonDragStart = { x, y };
+          polygonBasePoints = polygonPoints.map(p => ({ ...p }));
+          return;
+        }
+        return;
+      }
+      if (!roiEditing) return;
+      e.preventDefault();
+
+      const rect = roiCanvas.getBoundingClientRect();
+      const t = e.touches[0];
+      const x = t.clientX - rect.left;
+      const y = t.clientY - rect.top;
+
+      if (Math.abs(x - (roi.x + roi.w)) < 20 && Math.abs(y - (roi.y + roi.h)) < 20) {
+        resizing = true;
+        return;
+      }
+
+      if (x > roi.x && x < roi.x + roi.w && y > roi.y && y < roi.y + roi.h) {
+        dragging = true;
+        offsetX = x - roi.x;
+        offsetY = y - roi.y;
+      }
+    }, { passive: false });
+
+    roiCanvas.addEventListener("touchmove", e => {
+      if (lineEditing) {
+        e.preventDefault();
+        const rect = roiCanvas.getBoundingClientRect();
+        const t = e.touches[0];
+        const x = t.clientX - rect.left;
+        const y = t.clientY - rect.top;
+        if (lineEditTarget && lineEditTarget.__new && linePoints.length === 1) {
+          linePoints[1] = _roiClampPoint({ x, y });
+          drawLineEditor();
+          return;
+        }
+        if (lineDragMode === 'handle' && lineActiveHandle !== null) {
+          linePoints[lineActiveHandle] = _roiClampPoint({ x, y });
+          drawLineEditor();
+          return;
+        }
+        return;
+      }
+      if (polygonEditing) {
+        e.preventDefault();
+        const rect = roiCanvas.getBoundingClientRect();
+        const t = e.touches[0];
+        const x = t.clientX - rect.left;
+        const y = t.clientY - rect.top;
+        polygonLastMouse = { x, y };
+
+        if (polygonDragMode === 'vertex' && polygonActiveVertex >= 0) {
+          polygonPoints[polygonActiveVertex] = _roiClampPoint({ x, y });
+          drawPolygonEditor();
+          return;
+        }
+
+        if (polygonDragMode === 'move') {
+          const dx = x - polygonDragStart.x;
+          const dy = y - polygonDragStart.y;
+          polygonPoints = polygonBasePoints.map(p => _roiClampPoint({ x: p.x + dx, y: p.y + dy }));
+          drawPolygonEditor();
+          return;
+        }
+
+        if (polygonDragMode === 'resize' && polygonBaseBox) {
+          const minSize = 30;
+          let newMinX = polygonBaseBox.minX;
+          let newMaxX = polygonBaseBox.maxX;
+          let newMinY = polygonBaseBox.minY;
+          let newMaxY = polygonBaseBox.maxY;
+
+          if (polygonResizeHandle.includes('l')) newMinX = Math.min(x, polygonBaseBox.maxX - minSize);
+          if (polygonResizeHandle.includes('r')) newMaxX = Math.max(x, polygonBaseBox.minX + minSize);
+          if (polygonResizeHandle.includes('t')) newMinY = Math.min(y, polygonBaseBox.maxY - minSize);
+          if (polygonResizeHandle.includes('b')) newMaxY = Math.max(y, polygonBaseBox.minY + minSize);
+
+          newMinX = Math.max(0, Math.min(newMinX, roiCanvas.width));
+          newMaxX = Math.max(0, Math.min(newMaxX, roiCanvas.width));
+          newMinY = Math.max(0, Math.min(newMinY, roiCanvas.height));
+          newMaxY = Math.max(0, Math.min(newMaxY, roiCanvas.height));
+
+          const newBox = { minX: Math.min(newMinX, newMaxX), maxX: Math.max(newMinX, newMaxX), minY: Math.min(newMinY, newMaxY), maxY: Math.max(newMinY, newMaxY) };
+          polygonPoints = _scalePoints(polygonBasePoints, polygonBaseBox, newBox);
+          drawPolygonEditor();
+          return;
+        }
+
+        if (polygonDrawing) {
+          drawPolygonEditor();
+          return;
+        }
+        return;
+      }
+      if (!roiEditing) return;
+      e.preventDefault();
+
+      const rect = roiCanvas.getBoundingClientRect();
+      const t = e.touches[0];
+      const x = t.clientX - rect.left;
+      const y = t.clientY - rect.top;
+
+      if (resizing) {
+        roi.w = Math.max(40, x - roi.x);
+        roi.h = Math.max(40, y - roi.y);
+        drawEditorROI();
+      }
+
+      if (dragging) {
+        roi.x = Math.max(0, Math.min(x - offsetX, roiCanvas.width - roi.w));
+        roi.y = Math.max(0, Math.min(y - offsetY, roiCanvas.height - roi.h));
+        drawEditorROI();
+      }
+    }, { passive: false });
+
+    roiCanvas.addEventListener("touchend", () => {
+      if (lineEditing) {
+        lineDragMode = null;
+        lineActiveHandle = null;
+        return;
+      }
+      if (polygonEditing) {
+        polygonDragMode = null;
+        polygonActiveVertex = -1;
+        polygonResizeHandle = null;
+        polygonBaseBox = null;
+        return;
+      }
+      dragging = false;
+      resizing = false;
+    });
+
+
+    // ------------------ STOP EVERYTHING ------------------
+    function stopAll(options = {}) {
+      const resetModeButtons = options && options.resetModeButtons === false ? false : true;
+      suppressCameraErrors = true;
+      window.setTimeout(() => { suppressCameraErrors = false; }, 300);
+      enrollmentStreamRetryActive = false;
+      stopCameraRetryCountdown();
+      console.log("🛑 Stopping all connections...");
+      window._enrollmentActive = false;
+      if (typeof setDataChannelReady === 'function') {
+        setDataChannelReady(false);
+      }
+      if (typeof setWebRtcReady === 'function') {
+        setWebRtcReady(false);
+      }
+      // Ensure loading UI is hidden and timers cleared
+      try { hideLoadingOverlay(); } catch (e) { /* ignore */ }
+      if (window._loadingInterval) { clearInterval(window._loadingInterval); window._loadingInterval = null; }
+      if (window.keepAliveInterval) { clearInterval(window.keepAliveInterval); window.keepAliveInterval = null; }
+
+      // Clear any keep-alive intervals
+      if (window.keepAliveInterval) {
+        clearInterval(window.keepAliveInterval);
+        window.keepAliveInterval = null;
+      }
+
+      if (pc) {
+        try {
+          console.log("Closing PC, state:", pc.connectionState);
+          pc.close();
+          console.log("✅ PC closed");
+        } catch (e) {
+          console.error("Error closing PC:", e);
+        }
+      }
+      pc = null;
+
+      if (localStream) {
+        localStream.getTracks().forEach(t => {
+          t.stop();
+          console.log("Track stopped:", t.kind, t.id);
+        });
+        localStream = null;
+      }
+
+      // Stop any tracks currently attached to the video elements (local or remote)
+      try {
+        Object.values(videoEls).forEach(el => {
+          if (!el || !el.srcObject || typeof el.srcObject.getTracks !== 'function') return;
+          el.srcObject.getTracks().forEach(t => {
+            try { t.stop(); } catch (e) { /* ignore */ }
+          });
+          el.srcObject = null;
+        });
+        if (focusVideoEl && focusVideoEl.srcObject && typeof focusVideoEl.srcObject.getTracks === 'function') {
+          focusVideoEl.srcObject.getTracks().forEach(t => {
+            try { t.stop(); } catch (e) { /* ignore */ }
+          });
+          focusVideoEl.srcObject = null;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      hideROIEditor();
+      if (!inFocusMode) {
+        roiDisplayCanvas.style.display = "none";
+      } else {
+        drawRulesOverlay();
+      }
+
+      // Reset alert channel
+      window.alertChannel = null;
+
+      if (resetModeButtons) {
+        // Reset mode UI state when we truly want to stop everything.
+        try {
+          pmRunning = false;
+          testRunning = false;
+          const pmBtn = document.getElementById('pmBtn');
+          const testBtn = document.getElementById('testBtn');
+          if (pmBtn) {
+            pmBtn.textContent = 'Start Device Mode';
+            pmBtn.classList.remove('stop');
+            pmBtn.disabled = false;
+          }
+          if (testBtn) {
+            testBtn.textContent = 'Start CCTV Mode';
+            testBtn.classList.remove('stop');
+            testBtn.disabled = false;
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      console.log("✅ All connections stopped");
+    }
+
+    function stopDeviceMode() {
+      if (!pmRunning) return;
+      pmRunning = false;
+      const pmBtn = document.getElementById('pmBtn');
+      if (pmBtn) {
+        pmBtn.textContent = 'Start Device Mode';
+        pmBtn.classList.remove('stop');
+      }
+      stopAll({ resetModeButtons: true });
+      showGridUI();
+      startGridView().catch(e => console.error('startGridView failed', e));
+    }
+
+    function stopCCTVMode() {
+      if (!testRunning) return;
+      testRunning = false;
+      activeCctvCameraId = null;
+      const testBtn = document.getElementById('testBtn');
+      if (testBtn) {
+        testBtn.textContent = 'Start CCTV Mode';
+        testBtn.classList.remove('stop');
+      }
+      stopAll({ resetModeButtons: true });
+      showGridUI();
+      startGridView().catch(e => console.error('startGridView failed', e));
+    }
+
+    // ------------------ Loading overlay utilities ------------------
+    function updateLoadingUI(state = {}) {
+      const titleEl = document.getElementById('loadingTitle');
+      const subtitleEl = document.getElementById('loadingSubtitle');
+      const timerEl = document.getElementById('loadingTimer');
+      const hintEl = document.getElementById('loadingHint');
+      const progressEl = document.getElementById('loadingProgress');
+      if (!titleEl || !subtitleEl || !timerEl || !hintEl || !progressEl) return;
+      if (state.title) titleEl.textContent = state.title;
+      if (state.subtitle) subtitleEl.textContent = state.subtitle;
+      if (typeof state.progress === 'number') {
+        const pct = Math.max(0, Math.min(100, Math.round(state.progress)));
+        progressEl.style.width = `${pct}%`;
+      }
+      if (state.hint) hintEl.textContent = state.hint;
+      if (typeof state.elapsed === 'number') {
+        timerEl.textContent = `${state.elapsed.toFixed(1)}s`;
+      }
+    }
+
+    function showLoadingOverlay(phase = 'init') {
+      try {
+        const overlay = document.getElementById('loadingOverlay');
+        if (!overlay) return;
+        if (window._loadingInterval) {
+          clearInterval(window._loadingInterval);
+          window._loadingInterval = null;
+        }
+        window._loadingStart = Date.now();
+        window._loadingPhase = phase;
+        overlay.style.display = 'flex';
+
+        const phaseMap = {
+          init: { title: 'Connecting', subtitle: 'Preparing camera & network…', progress: 10, hint: 'Initializing' },
+          signaling: { title: 'Connecting', subtitle: 'Negotiating WebRTC…', progress: 35, hint: 'Signaling' },
+          data: { title: 'Connecting', subtitle: 'Opening control channel…', progress: 55, hint: 'Control channel' },
+          media: { title: 'Connecting', subtitle: 'Waiting for video…', progress: 75, hint: 'Receiving stream' },
+          ready: { title: 'Connected', subtitle: 'Stream ready', progress: 100, hint: 'Live' },
+          error: { title: 'Connection issue', subtitle: 'Trying again…', progress: 50, hint: 'Reconnecting' }
+        };
+
+        function tick() {
+          const elapsed = (Date.now() - window._loadingStart) / 1000;
+          const info = phaseMap[window._loadingPhase] || phaseMap.init;
+          updateLoadingUI({ ...info, elapsed });
+        }
+
+        tick();
+        window._loadingInterval = setInterval(tick, 200);
+      } catch (e) {
+        console.error('showLoadingOverlay error:', e);
+      }
+    }
+
+    function setLoadingPhase(phase) {
+      window._loadingPhase = phase;
+      updateLoadingUI({});
+    }
+
+    function hideLoadingOverlay() {
+      try {
+        const overlay = document.getElementById('loadingOverlay');
+        if (!overlay) return;
+        overlay.style.display = 'none';
+        if (window._loadingInterval) {
+          clearInterval(window._loadingInterval);
+          window._loadingInterval = null;
+        }
+      } catch (e) {
+        console.error('hideLoadingOverlay error:', e);
+      }
+    }
+    // ------------------ PM MODE ------------------
+    async function startPMMode() {
+      // start overlay immediately when user clicks Start (no delay)
+      showLoadingOverlay('init');
+      stopGridView();
+      showFocusUI();
+      // ensure any existing streams are stopped before opening a new one
+      try { stopAll({ resetModeButtons: false }); } catch (e) { /* ignore */ }
+      // small delay to ensure devices are released
+      await new Promise(resolve => setTimeout(resolve, 250));
+      try {
+        // Device mode uses the CLIENT camera (phone/laptop)
+        const constraints = getVideoConstraints();
+        // use higher frameRate for PM mode
+        constraints.video.frameRate = { ideal: 30, max: 30 };
+        constraints.video.width = { ideal: 1280 };
+        constraints.video.height = { ideal: 720 };
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        // Show local preview immediately (especially important on phones)
+        try { if (activeVideoEl) activeVideoEl.srcObject = localStream; } catch (e) { /* ignore */ }
+        await startWebRTC("pm", localStream, { source: "device" });
+      } catch (error) {
+        console.error("Error accessing camera:", error);
+        // hide overlay on error and inform user
+        hideLoadingOverlay();
+        alert("Failed to access camera. Please check permissions.");
+      }
+    }
+
+    // ------------------ TEST MODE ------------------
+    async function startTestMode(cameraId = selectedCameraId) {
+      // start overlay immediately when user clicks Test
+      showLoadingOverlay('init');
+      // ensure any existing streams are stopped before opening a new one
+      try { stopAll({ resetModeButtons: false }); } catch (e) { /* ignore */ }
+      // small delay to ensure devices are released
+      await new Promise(resolve => setTimeout(resolve, 250));
+      // For Test/CCTV mode we DO NOT open the client's camera — the server provides the test camera track.
+      // This avoids opening two cameras at once on the client.
+      try {
+        // Default behavior: use server camera track for CCTV/Test mode
+        activeCctvCameraId = Number(cameraId) || 1;
+        await startWebRTC("test", null, { source: "cctv", cameraId: activeCctvCameraId });
+      } catch (error) {
+        console.error("WebRTC Test mode error:", error);
+        hideLoadingOverlay();
+        alert("Failed to start CCTV/Test mode. Please check server logs.");
+      }
+    }
+
+
+    // ------------------ UNIVERSAL WEBRTC ------------------
+    async function startWebRTC(mode, stream, options = {}) {
+      const { skipOverlay = false, ignoreRemoteTrack = false, source = null, cameraId = null, analysis = true } = options;
+      console.log(`=== Starting WebRTC in ${mode} mode ===`);
+      if (!skipOverlay) {
+        // show connecting overlay with 7s countdown
+        showLoadingOverlay('signaling');
+      }
+
+      if (typeof setDataChannelReady === 'function') setDataChannelReady(false);
+      if (typeof setWebRtcReady === 'function') setWebRtcReady(false);
+
+      // Clean up any existing connection
+      if (pc && pc.connectionState !== "closed") {
+        try {
+          pc.close();
+          console.log("Closed existing PC");
+        } catch (e) {
+          console.error("Error closing existing PC:", e);
+        }
+      }
+
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        bundlePolicy: "max-bundle",
+        rtcpMuxPolicy: "require",
+        sdpSemantics: "unified-plan",
+        encodedInsertableStreams: false
+      });
+
+      // ⭐⭐ CREATE DATACHANNEL ON CLIENT SIDE ⭐⭐
+      console.log("Creating DataChannel from client side...");
+
+      // Use EITHER maxRetransmits OR maxPacketLifeTime, not both
+      const dataChannel = pc.createDataChannel("alerts", {
+        ordered: true,
+        maxRetransmits: 3  // Remove maxPacketLifeTime or use it instead
+        // OR use: maxPacketLifeTime: 10000  // 10 seconds
+      });
+
+      // Store reference globally for testing
+      window.alertChannel = dataChannel;
+
+      // Keep-alive ping interval (store on window so stopAll can clear it)
+      window.keepAliveInterval = null;
+
+      dataChannel.onopen = () => {
+        console.log("🔗🔗🔗 CLIENT DataChannel OPEN!");
+        console.log("Ready state:", dataChannel.readyState);
+        console.log("DataChannel protocol:", dataChannel.protocol);
+        console.log("DataChannel reliable?", dataChannel.reliable);
+
+        if (typeof setDataChannelReady === 'function') {
+          setDataChannelReady(dataChannel.readyState === 'open');
+        }
+        setLoadingPhase('data');
+
+        // Start keep-alive ping
+        window.keepAliveInterval = setInterval(() => {
+          if (dataChannel && dataChannel.readyState === "open") {
+            try {
+              const pingMsg = JSON.stringify({
+                type: "ping",
+                timestamp: Date.now(),
+                state: "alive"
+              });
+              dataChannel.send(pingMsg);
+              console.log("📡 Keep-alive ping sent");
+            } catch (e) {
+              console.error("Keep-alive ping failed:", e);
+              if (window.keepAliveInterval) {
+                clearInterval(window.keepAliveInterval);
+                window.keepAliveInterval = null;
+              }
+            }
+          } else {
+            console.log("DataChannel not open for ping, state:", dataChannel ? dataChannel.readyState : "no channel");
+            if (window.keepAliveInterval) {
+              clearInterval(window.keepAliveInterval);
+              window.keepAliveInterval = null;
+            }
+          }
+        }, 3000);  // Every 3 seconds (more frequent)
+
+        // Send test message immediately
+        try {
+          const testMsg = JSON.stringify({
+            type: "hello",
+            message: "Client connected to alerts channel",
+            timestamp: new Date().toISOString(),
+            mode: mode
+          });
+          dataChannel.send(testMsg);
+          console.log("✅ Test message sent to server:", testMsg);
+        } catch (e) {
+          console.error("Failed to send test message:", e);
+        }
+      };
+
+      dataChannel.onclose = () => {
+        console.log("❌❌❌ CLIENT DataChannel CLOSED");
+        if (typeof setDataChannelReady === 'function') {
+          setDataChannelReady(false);
+        }
+        if (window.keepAliveInterval) {
+          clearInterval(window.keepAliveInterval);
+          window.keepAliveInterval = null;
+        }
+      };
+
+      dataChannel.onerror = (err) => {
+        console.error("⚠️⚠️⚠️ CLIENT DataChannel ERROR:", err);
+        console.error("Error name:", err.name, "Error message:", err.message);
+        if (typeof setDataChannelReady === 'function') {
+          setDataChannelReady(false);
+        }
+      };
+
+      dataChannel.onmessage = (msg) => {
+        console.log("📨📨📨 MESSAGE FROM SERVER:", msg.data);
+        try {
+          const data = JSON.parse(msg.data);
+          console.log("📋 Parsed alert:", data);
+          console.log(`🔍 Event type: "${data.event}"`);
+          processServerAlert(data);
+          // Pass the whole object so addAlert can use the server-provided timestamp
+          if (shouldDisplayAlert(data)) {
+            addAlert(data);
+          }
+        } catch (e) {
+          console.log("❌ Could not parse as JSON:", msg.data);
+          // show raw message in UI as fallback
+          try {
+            const fallback = { person: 'SERVER', event: String(msg.data), timestamp: new Date().toLocaleTimeString() };
+            if (shouldDisplayAlert(fallback)) {
+              addAlert(fallback);
+            }
+          } catch (err) {
+            console.error('Failed to add raw server alert fallback', err);
+          }
+        }
+      };
+
+      // Handle incoming video track
+      pc.ontrack = e => {
+        if (ignoreRemoteTrack) {
+          console.log('Ignoring remote track while the enrollment channel is open');
+          return;
+        }
+        console.log("🎥 Video track received");
+        console.log("Track ID:", e.track.id);
+        console.log("Stream ID:", e.streams[0].id);
+        if (activeVideoEl) {
+          activeVideoEl.srcObject = e.streams[0];
+          setLoadingPhase('media');
+          const done = () => {
+            setLoadingPhase('ready');
+            if (!skipOverlay) hideLoadingOverlay();
+          };
+          activeVideoEl.addEventListener('playing', done, { once: true });
+          activeVideoEl.addEventListener('loadeddata', done, { once: true });
+          if (window._videoReadyTimer) clearTimeout(window._videoReadyTimer);
+          window._videoReadyTimer = setTimeout(done, 4000);
+        }
+      };
+
+      // Handle connection state changes
+      pc.onconnectionstatechange = () => {
+        console.log("🔌 Connection state:", pc.connectionState);
+        if (typeof setWebRtcReady === 'function') {
+          setWebRtcReady(pc.connectionState === "connected");
+        }
+        if (pc.connectionState === "connecting") {
+          setLoadingPhase('media');
+        }
+        if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+          console.log("Connection lost, stopping...");
+          setLoadingPhase('error');
+          if (window.keepAliveInterval) {
+            clearInterval(window.keepAliveInterval);
+            window.keepAliveInterval = null;
+          }
+          stopAll();
+        }
+
+        if (pc.connectionState === "connected") {
+          console.log("✅✅✅ WebRTC connection established!");
+          // connection established — hide overlay (if still visible)
+          setLoadingPhase('media');
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log("❄️ ICE connection state:", pc.iceConnectionState);
+        if (pc.iceConnectionState === "failed") {
+          console.error("ICE connection failed!");
+        }
+      };
+
+      pc.onicecandidateerror = (event) => {
+        console.error("ICE candidate error:", event.errorCode, event.errorText);
+      };
+
+      // Add local stream if provided (PM mode)
+      if (stream) {
+        console.log("Adding local stream tracks");
+        stream.getTracks().forEach(t => {
+          pc.addTrack(t, stream);
+          console.log("Added track:", t.kind, t.id);
+        });
+        applyVideoBitrateLimit(window.innerWidth < 600 ? 3_000_000 : 6_000_000);
+      }
+
+      // Ensure we can receive a server video track even when we don't attach a local camera
+      if (mode === "test" || !stream) {
+        console.log("Adding video transceiver (recvonly)");
+        pc.addTransceiver("video", { direction: "recvonly" });
+      }
+
+      // Create and send offer
+      try {
+        console.log("Creating offer...");
+        const offerOptions = {
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: true
+        };
+
+        const offer = await pc.createOffer(offerOptions);
+        console.log("✅ Offer created");
+
+        // Check SDP for DataChannel
+        console.log("Checking offer SDP for DataChannel...");
+        const hasDataChannel = offer.sdp.includes("m=application") ||
+          offer.sdp.includes("webrtc-datachannel") ||
+          offer.sdp.includes("SCTP");
+
+        if (hasDataChannel) {
+          console.log("✅ DataChannel IS in offer SDP");
+        } else {
+          console.warn("⚠️ DataChannel NOT in offer SDP");
+          console.log("SDP preview:", offer.sdp.substring(0, 500));
+        }
+
+        await pc.setLocalDescription(offer);
+        console.log("✅ Set local description");
+
+        const resp = await apiFetch("/offer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sdp: pc.localDescription.sdp,
+            type: pc.localDescription.type,
+            mode: mode,
+            source: source || (mode === "test" ? "cctv" : "device"),
+            cameraId: cameraId,
+            analysis: analysis
+          })
+        });
+
+        if (!resp.ok) {
+          const errorText = await resp.text();
+          throw new Error(`Server responded with ${resp.status}: ${errorText}`);
+        }
+
+        const answer = await resp.json();
+        console.log("✅ Received answer from server");
+
+        if (!pc) {
+          console.log("PC was cleaned up, ignoring answer");
+          return;
+        }
+
+        console.log("Answer type:", answer.type);
+        await pc.setRemoteDescription(answer);
+        console.log("✅ Set remote description");
+
+      } catch (error) {
+        console.error("❌ WebRTC setup error:", error);
+        alert(`WebRTC connection failed: ${error.message}`);
+        if (window.keepAliveInterval) {
+          clearInterval(window.keepAliveInterval);
+          window.keepAliveInterval = null;
+        }
+        stopAll();
+        return;
+      }
+
+      // (Debug/test helpers removed)
+
+      // Debug: Log when we get candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log("ICE candidate generated");
+        } else {
+          console.log("✅ ICE gathering complete");
+        }
+      };
+
+      // Log DataChannel buffered amount changes
+      dataChannel.onbufferedamountlow = () => {
+        console.log("📦 DataChannel buffered amount low:", dataChannel.bufferedAmount);
+      };
+    }
+
+    // ------------------ ALERT UI ------------------
+    function addAlert(arg1, arg2, arg3) {
+      // Accepts either: addAlert({person, event, timestamp}) OR addAlert(person, event, timestamp)
+      let person, event, timestamp, clipUrl;
+      if (typeof arg1 === 'object' && arg1 !== null) {
+        person = arg1.person || arg1.name || 'SYSTEM';
+        event = arg1.event || arg1.message || String(arg1 || '');
+        timestamp = arg1.timestamp || new Date().toLocaleTimeString();
+        clipUrl = arg1.clip_url || arg1.clipUrl || '';
+        if (clipUrl) {
+          _addClipFromAlert(arg1);
+        }
+      } else {
+        person = arg1 || 'SYSTEM';
+        event = arg2 || 'No details';
+        timestamp = arg3 || new Date().toLocaleTimeString();
+        clipUrl = '';
+      }
+
+      console.log("📬📬📬 RAW ALERT RECEIVED:", { person, event, timestamp, clipUrl });
+
+      const div = document.createElement("div");
+      div.className = "alert-item";
+      const prefix = document.createElement('span');
+      prefix.textContent = `[${timestamp}] ${person} — ${event}`;
+      div.appendChild(prefix);
+
+      if (clipUrl) {
+        let openUrl = clipUrl;
+        try {
+          if (authToken && !/[?&]token=/.test(openUrl)) {
+            openUrl += (openUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(authToken);
+          }
+        } catch (e) {
+          openUrl = clipUrl;
+        }
+        const sep = document.createTextNode(' ');
+        div.appendChild(sep);
+        const a = document.createElement('a');
+        a.href = openUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = 'Open clip';
+        a.style.color = '#7dd3fc';
+        a.style.textDecoration = 'underline';
+        div.appendChild(a);
+      }
+      alertsDiv.prepend(div);
+
+      // Keep more alerts for debugging
+      while (alertsDiv.children.length > 20) {
+        alertsDiv.removeChild(alertsDiv.lastChild);
+      }
+
+      console.log(`📋 UI Alert Added: ${timestamp} - ${person} - ${event}`);
+
+      // Also highlight new alerts
+      div.style.animation = "highlight 2s";
+
+      // Add CSS for highlight animation
+      if (!document.getElementById('highlight-style')) {
+        const style = document.createElement('style');
+        style.id = 'highlight-style';
+        style.textContent = `
+      @keyframes highlight {
+        0% { background-color: #4cd137; }
+        100% { background-color: #2c2c2c; }
+      }
+    `;
+        document.head.appendChild(style);
+      }
+    }
+    // Test button for debugging
+    // (Debug/test button handlers removed)
+
+
+    // ------------------ BUTTONS ------------------
+    const editBtn = document.getElementById("editROI");
+    const saveBtn = document.getElementById("saveROI");
+    const cancelBtn = document.getElementById("cancelROI");
+    if (editBtn) editBtn.onclick = editROI;
+    if (saveBtn) saveBtn.onclick = saveROI;
+    if (cancelBtn) cancelBtn.onclick = cancelROI;
+
+    focusTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        focusTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.tab;
+        focusTabContents.forEach(c => {
+          c.classList.toggle('active', c.id === `focusTab-${target}`);
+        });
+      });
+    });
+
+    focusRulesLoadBtn?.addEventListener('click', () => loadFocusRules(currentRulesCamera || selectedCameraId || 'device'));
+    focusRulesSaveBtn?.addEventListener('click', () => saveFocusRules());
+    focusRulesClearBtn?.addEventListener('click', () => clearFocusZones());
+    focusRulesSyncBtn?.addEventListener('click', () => syncFocusRules());
+    focusAddZoneBtn?.addEventListener('click', () => startAddZone());
+    focusAddParkingBtn?.addEventListener('click', () => startAddParkingZone());
+    focusAddLineBtn?.addEventListener('click', () => startAddLine());
+
+    focusCameraProfileEl?.addEventListener('change', () => {
+      const profile = focusCameraProfileEl.value || 'office';
+      saveCameraProfile(currentRulesCamera || selectedCameraId || 'device', profile);
+      applyProfileToTabs(profile);
+    });
+
+    focusRoiEnabledEl?.addEventListener('change', () => {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.roi_intrusion.enabled = focusRoiEnabledEl.checked;
+      drawRulesOverlay();
+      cacheDraft();
+    });
+    focusLinesEnabledEl?.addEventListener('change', () => {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.virtual_lines.enabled = focusLinesEnabledEl.checked;
+      drawRulesOverlay();
+      cacheDraft();
+    });
+    focusParkingEnabledEl?.addEventListener('change', () => {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.parking_rules.enabled = focusParkingEnabledEl.checked;
+      drawRulesOverlay();
+      cacheDraft();
+    });
+    focusUnknownEnabledEl?.addEventListener('change', () => {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.unknown_person.enabled = focusUnknownEnabledEl.checked;
+      cacheDraft();
+    });
+    focusMaxPeopleEnabledEl?.addEventListener('change', () => {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.max_people.enabled = focusMaxPeopleEnabledEl.checked;
+      cacheDraft();
+    });
+    focusMaxPeopleValueEl?.addEventListener('change', () => {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.max_people.value = Number(focusMaxPeopleValueEl.value || 0);
+      cacheDraft();
+    });
+    focusRulesActiveEl?.addEventListener('change', () => {
+      if (!currentRulesDraft) return;
+      currentRulesDraft.active = focusRulesActiveEl.checked;
+      cacheDraft();
+    });
+    [focusRulesStartEl, focusRulesEndEl].forEach(el => {
+      el?.addEventListener('change', () => {
+        if (!currentRulesDraft) return;
+        currentRulesDraft.active_hours = [{ days: focusGetSelectedDays(), start: focusRulesStartEl.value || '00:00', end: focusRulesEndEl.value || '23:59' }];
+        cacheDraft();
+      });
+    });
+    focusRulesDaysEl?.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (!currentRulesDraft) return;
+        currentRulesDraft.active_hours = [{ days: focusGetSelectedDays(), start: focusRulesStartEl.value || '00:00', end: focusRulesEndEl.value || '23:59' }];
+        cacheDraft();
+      });
+    });
+
+    // Add Face button handler
+    const addFaceButton = document.getElementById('addFaceBtn');
+    if (addFaceButton) addFaceButton.onclick = addFace;
+
+    document.getElementById("pmBtn").onclick = async () => {
+      if (_enrollmentOpen || window._enrollmentActive) {
+        addAlert('SYSTEM', 'Finish enrollment before switching modes.');
+        return;
+      }
+      const btn = document.getElementById("pmBtn");
+
+      if (!pmRunning) {
+        // Starting Device mode
+        btn.textContent = "Stop Device Mode";
+        btn.classList.add("stop");
+        pmRunning = true;
+        // Stop test mode if it's running
+        if (testRunning) {
+          const testBtn = document.getElementById("testBtn");
+          testBtn.textContent = "Start CCTV Mode";
+          testBtn.classList.remove("stop");
+          testRunning = false;
+          stopAll({ resetModeButtons: false });
+          // Small delay to ensure clean stop
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        await startPMMode();
+      } else {
+        stopDeviceMode();
+      }
+    };
+
+    document.getElementById("testBtn").onclick = async () => {
+      if (_enrollmentOpen || window._enrollmentActive) {
+        addAlert('SYSTEM', 'Finish enrollment before switching modes.');
+        return;
+      }
+      if (!testRunning) {
+        await enterFocusView(selectedCameraId);
+        return;
+      }
+      stopCCTVMode();
+    };
+
+    const backBtn = document.getElementById("backToGrid");
+    if (backBtn) {
+      backBtn.onclick = async () => {
+        if (pmRunning) {
+          stopDeviceMode();
+          return;
+        }
+        if (testRunning) {
+          stopCCTVMode();
+          return;
+        }
+        showGridUI();
+        await startGridView();
+      };
+    }
+
+    const zoomRange = document.getElementById('zoomRange');
+    const zoomInBtn = document.getElementById('zoomIn');
+    const zoomOutBtn = document.getElementById('zoomOut');
+    const zoomResetBtn = document.getElementById('zoomReset');
+
+    function setZoom(level) {
+      zoomLevel = Math.min(3, Math.max(1, Number(level) || 1));
+      if (zoomRange) zoomRange.value = String(zoomLevel);
+      applyZoom();
+    }
+
+    if (zoomRange) {
+      zoomRange.addEventListener('input', () => setZoom(zoomRange.value));
+    }
+    if (zoomInBtn) {
+      zoomInBtn.addEventListener('click', () => setZoom(zoomLevel + 0.1));
+    }
+    if (zoomOutBtn) {
+      zoomOutBtn.addEventListener('click', () => setZoom(zoomLevel - 0.1));
+    }
+    if (zoomResetBtn) {
+      zoomResetBtn.addEventListener('click', () => {
+        panX = 0;
+        panY = 0;
+        setZoom(1);
+      });
+    }
+
+    if (focusContainerEl) {
+      focusContainerEl.addEventListener('mousedown', (e) => {
+        if (!inFocusMode || zoomLevel <= 1) return;
+        isPanning = true;
+        panStart = { x: e.clientX - panX, y: e.clientY - panY };
+      });
+
+      focusContainerEl.addEventListener('mousemove', (e) => {
+        if (!isPanning) return;
+        panX = e.clientX - panStart.x;
+        panY = e.clientY - panStart.y;
+        applyZoom();
+      });
+
+      window.addEventListener('mouseup', () => {
+        isPanning = false;
+      });
+
+      focusContainerEl.addEventListener('touchstart', (e) => {
+        if (!inFocusMode || zoomLevel <= 1) return;
+        const t = e.touches[0];
+        isPanning = true;
+        panStart = { x: t.clientX - panX, y: t.clientY - panY };
+      }, { passive: true });
+
+      focusContainerEl.addEventListener('touchmove', (e) => {
+        if (!isPanning) return;
+        const t = e.touches[0];
+        panX = t.clientX - panStart.x;
+        panY = t.clientY - panStart.y;
+        applyZoom();
+      }, { passive: true });
+
+      window.addEventListener('touchend', () => {
+        isPanning = false;
+      }, { passive: true });
+    }
+    // (Debug/test button handler removed)
+    // Keep ROI aligned on window resize
+    window.addEventListener("resize", () => {
+      positionCanvases();
+      drawDisplayROI();
+    });
+
+    // Helper: wait until video element has started playing or timeout
+    function waitForVideoReady(timeout = 2000) {
+      return new Promise((resolve) => {
+        if (activeVideoEl && activeVideoEl.readyState >= 2) return resolve(true);
+        let resolved = false;
+        function onPlaying() {
+          if (resolved) return;
+          resolved = true;
+          if (activeVideoEl) activeVideoEl.removeEventListener('playing', onPlaying);
+          resolve(true);
+        }
+        if (activeVideoEl) activeVideoEl.addEventListener('playing', onPlaying);
+        // fallback timeout
+        setTimeout(() => {
+          if (resolved) return;
+          resolved = true;
+          if (activeVideoEl) activeVideoEl.removeEventListener('playing', onPlaying);
+          resolve(false);
+        }, timeout);
+      });
+    }
+
+    // Handle enrollment start
+    if (startEnrollmentBtn) {
+      startEnrollmentBtn.addEventListener('click', async function () {
+        const name = document.getElementById('faceNameInput').value.trim();
+        if (!name) {
+          addAlert("SYSTEM", "Please enter a name");
+          return;
+        }
+
+        // Send enrollment request (guard websocket)
+        if (!window.ws || window.ws.readyState !== 1) {
+          addAlert("SYSTEM", "Not connected to server. Try again.");
+          return;
+        }
+
+        try {
+          window.ws.send(JSON.stringify({ action: "enroll_face", name: name }));
+        } catch (e) {
+          console.error('Failed to send enroll request', e);
+          addAlert('SYSTEM', 'Failed to send enroll request');
+          return;
+        }
+
+        resetEnrollmentProgress();
+        setGuidanceMessage();
+
+        // Disable button and show loading
+        const btn = startEnrollmentBtn;
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Enrolling...";
+        }
+        // Start sending snapshots from the main video to the server for enrollment
+        try {
+          if (window._enrollInterval) { clearInterval(window._enrollInterval); window._enrollInterval = null; }
+
+          // create a small offscreen canvas for snapshots
+          const canvas = document.createElement('canvas');
+          const vw = videoEl.videoWidth || 640;
+          const vh = videoEl.videoHeight || 480;
+          const TARGET_W = ENROLLMENT_FRAME_WIDTH;
+          const TARGET_H = ENROLLMENT_FRAME_HEIGHT;
+
+          canvas.width = TARGET_W;
+          canvas.height = TARGET_H;
+
+          const cctx = canvas.getContext('2d');
+          cctx.drawImage(videoEl, 0, 0, TARGET_W, TARGET_H);
+          window._enrollCanvas = canvas;
+          window._enrollCtx = cctx;
+
+          // wait for video to be ready (playing) so frames are not empty
+          const ready = await waitForVideoReady(2000);
+          if (!ready) {
+            console.warn('Video not ready before snapshot loop started');
+          }
+
+          // track sent frames for debugging
+          window._enrollSentFrames = 0;
+          window._enrollInterval = setInterval(() => {
+            try {
+              if (!videoEl || !videoEl.srcObject) return;
+
+              // Light backpressure: if WS is congested, skip this tick.
+              if (window.ws && typeof window.ws.bufferedAmount === 'number' && window.ws.bufferedAmount > 5_000_000) {
+                return;
+              }
+
+              // draw current video frame
+              cctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+              const data = canvas.toDataURL('image/jpeg', ENROLLMENT_IMAGE_QUALITY);
+              if (window.ws && window.ws.readyState === 1) {
+                window.ws.send(JSON.stringify({ action: 'enroll_frame', name: name, image: data }));
+                window._enrollSentFrames += 1;
+                // update UI and console for visibility
+                const statusEl = document.getElementById('enrollmentStatus');
+                if (statusEl) statusEl.textContent = `Sending frames for ${name}…`;
+                console.log('enroll_frame sent', window._enrollSentFrames);
+              }
+            } catch (err) {
+              console.error('Error sending enroll frame', err);
+            }
+          }, 200);
+        } catch (err) {
+          console.error('Failed to start enroll snapshot loop', err);
+        }
+      });
+    }
+
+    async function viewDatabase() {
+      try {
+        const resp = await apiFetch('/face/list');
+        if (!resp.ok) {
+          throw new Error(`Server returned ${resp.status}`);
+        }
+        const data = await resp.json();
+        const faces = Array.isArray(data.faces) ? data.faces : [];
+        if (faces.length === 0) {
+          addAlert("SYSTEM", "No faces in database.");
+          return;
+        }
+        faces.sort((a, b) => a.localeCompare(b));
+        let message = "Enrolled Faces:\n\n";
+        faces.forEach((face, index) => {
+          message += `${index + 1}. ${face}\n`;
+        });
+        message += "\nEnter the name to delete (or cancel to close):";
+        const toDelete = prompt(message);
+        if (toDelete && faces.includes(toDelete)) {
+          if (confirm(`Delete face: ${toDelete}?`)) {
+            if (window.ws && window.ws.readyState === 1) {
+              window.ws.send(JSON.stringify({ action: "delete_face", name: toDelete }));
+            } else {
+              addAlert('SYSTEM', 'Not connected to server.');
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch face list', err);
+        addAlert('SYSTEM', `Unable to load database: ${err.message}`);
+      }
+    }
+
+    function deleteFace(name) {
+      if (window.ws && window.ws.readyState === 1) {
+        window.ws.send(JSON.stringify({ action: "delete_face", name: name }));
+      } else {
+        addAlert('SYSTEM', 'Not connected to server.');
+      }
+    }
+
+    async function createEnrollLink() {
+      const res = await apiFetch('/enroll/create', { method: 'POST' });
+      if (!res.ok) {
+        let detail = '';
+        try {
+          detail = await res.text();
+        } catch (e) { /* ignore */ }
+        alert(`Failed to create invite (${res.status})${detail ? `: ${detail}` : ''}`);
+        return;
+      }
+
+      const data = await res.json();
+      currentInvite = location.origin + data.url;
+
+      document.getElementById('inviteLink').value = currentInvite;
+      document.getElementById('inviteModal').style.display = 'block';
+    }
+
+    function copyInvite() {
+      navigator.clipboard.writeText(currentInvite);
+      alert('Link copied');
+    }
+
+    function openInvite() {
+      window.open(currentInvite, '_blank');
+    }
+
+    function closeInvite() {
+      document.getElementById('inviteModal').style.display = 'none';
+    }
+  </script>
+
+</body>
+
+</html>

@@ -1,0 +1,82 @@
+.filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+
+.select-wrapper {
+  position: relative;
+}
+
+.select-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.filter-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.select-wrapper select {
+  padding-left: 30px;
+}
+
+.add-btn {
+  margin-left: auto;
+  background: #111;
+  color: white;
+  border-color: #111;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 16px;
+  text-align: left;
+}
+
+thead tr {
+  border-bottom: 2px solid var(--border);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.pagination {
+  display: flex;
+  gap: 6px;
+}
+
+.page {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.page.active {
+  background: #111;
+  color: white;
+}

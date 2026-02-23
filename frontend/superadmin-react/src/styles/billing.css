@@ -1,0 +1,82 @@
+/* ============================= */
+/* Billing Page Layout */
+/* ============================= */
+
+.billing-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+
+/* ============================= */
+/* Top Stat Cards */
+/* ============================= */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.stat-card {
+  padding: 18px;
+}
+
+.stat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.stat-icon {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+/* Optional colored variants */
+.stat-icon.green {
+  color: #22c55e;
+}
+
+.stat-icon.yellow {
+  color: #f59e0b;
+}
+
+.stat-icon.red {
+  color: #ef4444;
+}
+
+
+/* ============================= */
+/* Upcoming Renewals Section */
+/* ============================= */
+
+.table-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.table-header p {
+  margin: 4px 0 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}

@@ -1,0 +1,65 @@
+/* Responsive adjustments for phones */
+@media (max-width: 800px) {
+  body {
+    padding: 12px;
+  }
+
+  .camera-grid {
+    width: 95vw;
+    max-width: 720px;
+  }
+
+  .focus-container,
+  .focus-controls,
+  #alertsBox {
+    width: 95vw;
+    max-width: 720px;
+  }
+
+  .below-video-row {
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  #faceEnrollment,
+  #alertsBox {
+    width: 100%;
+  }
+
+  .btn-row {
+    justify-content: center;
+  }
+
+  .alert-item {
+    font-size: 14px;
+  }
+
+  .loading-card {
+    max-width: 92vw;
+    width: auto;
+    padding: 14px;
+  }
+
+  .loading-title {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  .camera-tile {
+    aspect-ratio: 4/3;
+  }
+
+  .focus-container {
+    aspect-ratio: 4/3;
+  }
+
+  .alert-item {
+    font-size: 13px;
+  }
+
+  .loading-card {
+    padding: 10px;
+  }
+}

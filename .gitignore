@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*$py.class
+*.py[cod]
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Logs & temp
+*.log
+*.tmp
+*.temp
+*.pid
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+lib/
+lib64/
+wheels/
+downloads/
+parts/
+sdist/
+var/
+
+# Backups
+backup_*/
+test_*.py
+*.backup
+*_backup.*
+*.env
+event_clips/
+dataset*/
+node_modules/
+certs/
+*.sqlite
+extra_prune_later/
+faces_raw/
+models/
+runs/
+*.pt
+training/
+create_hash.py
+*.onxx
+animals_multiclass/
+best_accuracy_model.mlpackage/
+*.npz
+peron_accuracy.py
+run_roi_camera.sh
