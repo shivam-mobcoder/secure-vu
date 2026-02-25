@@ -57,3 +57,10 @@ CREATE TABLE cameras (
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- USER_CAMERAS (MANY-TO-MANY)
+CREATE TABLE user_cameras (
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    camera_id INTEGER REFERENCES cameras(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, camera_id)
+);
