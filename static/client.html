@@ -220,7 +220,13 @@
     <h3>Alerts</h3>
     <div id="alerts"></div>
     <div id="clipsPanel" class="clips-panel">
-      <h3>Event Clips</h3>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <h3 style="margin:0;">Event Clips</h3>
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#e5e7eb; user-select:none;">
+          <input type="checkbox" id="clipCaptureToggle" checked /> Capture
+        </label>
+      </div>
+      <div id="clipCaptureHint" style="margin-top:6px; font-size:12px; color:#fbbf24; display:none;"></div>
       <div class="clips-filter-row">
         <select id="clipFilterCamera" class="clips-select">
           <option value="">All Cams</option>
@@ -440,12 +446,59 @@
     });
     const alertsDiv = document.getElementById("alerts");
     const clipsListDiv = document.getElementById("clipsList");
+    const clipCaptureToggleEl = document.getElementById("clipCaptureToggle");
+    const clipCaptureHintEl = document.getElementById("clipCaptureHint");
     const clipFilterCameraEl = document.getElementById("clipFilterCamera");
     const clipFilterTypeEl = document.getElementById("clipFilterType");
     const clipFilterTextEl = document.getElementById("clipFilterText");
     const clipClearBtnEl = document.getElementById("clipClearBtn");
     const CLIP_STORE_KEY = "securecv_event_clips_v1";
     let eventClips = [];
+
+    async function refreshClipCaptureToggle() {
+      if (!clipCaptureToggleEl) return;
+      try {
+        const resp = await apiFetch('/api/event-clips/settings');
+        if (!resp.ok) throw new Error('settings fetch failed');
+        const data = await resp.json();
+        const enabled = !!data?.enabled;
+        clipCaptureToggleEl.checked = enabled;
+        if (clipCaptureHintEl) {
+          clipCaptureHintEl.style.display = enabled ? 'none' : 'block';
+          clipCaptureHintEl.textContent = enabled
+            ? ''
+            : 'Clip capture is OFF (alerts will still work).';
+        }
+      } catch (e) {
+        // If forbidden or backend doesn't support it, just keep UI quiet.
+        console.warn('clip settings unavailable', e);
+      }
+    }
+
+    clipCaptureToggleEl?.addEventListener('change', async () => {
+      try {
+        const desired = !!clipCaptureToggleEl.checked;
+        const resp = await apiFetch('/api/event-clips/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: desired }),
+        });
+        if (!resp.ok) throw new Error('toggle failed');
+        const data = await resp.json();
+        const enabled = !!data?.enabled;
+        clipCaptureToggleEl.checked = enabled;
+        if (clipCaptureHintEl) {
+          clipCaptureHintEl.style.display = enabled ? 'none' : 'block';
+          clipCaptureHintEl.textContent = enabled
+            ? ''
+            : 'Clip capture is OFF (alerts will still work).';
+        }
+      } catch (e) {
+        console.warn('clip toggle failed', e);
+        // Re-sync from server to avoid UI lying.
+        refreshClipCaptureToggle();
+      }
+    });
 
     function _loadEventClips() {
       try {
@@ -803,6 +856,7 @@
         await loadSuperAdminClients();
         return;
       }
+      refreshClipCaptureToggle().catch(e => console.warn('refreshClipCaptureToggle failed', e));
       connectWebSocket();
       populateCameras().catch(e => console.warn('populateCameras failed', e));
       setSelectedCameraId(1);

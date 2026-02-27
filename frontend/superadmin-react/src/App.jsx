@@ -13,6 +13,7 @@ import BillingOverview from "./pages/BillingOverview";
 import Settings from "./pages/Settings";
 import ClientDetailView from "./pages/ClientDetailView";
 import AddClient from "./pages/AddClient";
+import UserManagement from "./pages/UserManagement";
 import AdminLayout from "./components/AdminLayout";
 import AdminDashboardLayout from "./components/AdminDashboardLayout";
 import RequireRole from "./components/RequireRole";
@@ -38,13 +39,14 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
       </Route>
 
-      {/* ── Admin area (admin role only) ─────────────────────────────── */}
-      <Route element={<RequireRole allowed={["admin"]} />}>
+      {/* ── Admin area (admin + member role) ─────────────────────────── */}
+      <Route element={<RequireRole allowed={["admin", "member"]} />}>
         <Route path="/admin/dashboard" element={<AdminDashboardLayout />}>
           <Route index element={<Navigate to="face/enroll" replace />} />
           <Route path="face/enroll" element={<FaceEnrollment />} />
           <Route path="face/logs" element={<RecognitionLogs />} />
           <Route path="live-feed" element={<AdminFeed />} />
+          <Route path="users" element={<UserManagement />} />
         </Route>
       </Route>
 

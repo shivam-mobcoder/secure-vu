@@ -1,10 +1,12 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { ScanFace, ClipboardList, LogOut, Tv } from "lucide-react";
-import { clearAuth, getStoredRole } from "../auth";
+import { ScanFace, ClipboardList, LogOut, Tv, Users } from "lucide-react";
+import { clearAuth, getStoredRole, getStoredPermissions } from "../auth";
 
 export default function AdminDashboardLayout() {
     const navigate = useNavigate();
-    const role = getStoredRole() || "Admin";
+    const role = (getStoredRole() || "admin").toLowerCase();
+    const isAdmin = role === "admin" || role === "super_admin";
+    const perms = getStoredPermissions();
 
     function handleLogout() {
         clearAuth();
@@ -19,6 +21,8 @@ export default function AdminDashboardLayout() {
                 : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
         ].join(" ");
 
+    const hasPerm = (p) => isAdmin || perms.includes(p);
+
     return (
         <div className="grid min-h-screen grid-cols-[240px_1fr]">
             {/* ── Sidebar ─────────────────────────────────────── */}
@@ -28,20 +32,33 @@ export default function AdminDashboardLayout() {
 
                 {/* Nav */}
                 <nav className="flex flex-col gap-1">
-                    <NavLink to="face/enroll" className={navClass}>
-                        <ScanFace size={18} />
-                        Face Enrollment
-                    </NavLink>
+                    {hasPerm("face_enroll") && (
+                        <NavLink to="face/enroll" className={navClass}>
+                            <ScanFace size={18} />
+                            Face Enrollment
+                        </NavLink>
+                    )}
 
-                    <NavLink to="face/logs" className={navClass}>
-                        <ClipboardList size={18} />
-                        Recognition Logs
-                    </NavLink>
+                    {hasPerm("recognition_logs") && (
+                        <NavLink to="face/logs" className={navClass}>
+                            <ClipboardList size={18} />
+                            Recognition Logs
+                        </NavLink>
+                    )}
 
-                    <NavLink to="live-feed" className={navClass}>
-                        <Tv size={18} />
-                        Live Feed
-                    </NavLink>
+                    {hasPerm("live_feed") && (
+                        <NavLink to="live-feed" className={navClass}>
+                            <Tv size={18} />
+                            Live Feed
+                        </NavLink>
+                    )}
+
+                    {isAdmin && (
+                        <NavLink to="users" className={navClass}>
+                            <Users size={18} />
+                            User Management
+                        </NavLink>
+                    )}
                 </nav>
 
                 {/* Spacer + Logout */}
@@ -51,7 +68,9 @@ export default function AdminDashboardLayout() {
                         <div className="text-sm font-semibold capitalize text-slate-800">
                             {role.replace(/_/g, " ")}
                         </div>
-                        <div className="text-xs text-slate-500">Admin Portal</div>
+                        <div className="text-xs text-slate-500">
+                            {isAdmin ? "Admin Portal" : "Member Portal"}
+                        </div>
                     </div>
                     <button
                         onClick={handleLogout}

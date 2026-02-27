@@ -4,13 +4,13 @@ import react from '@vitejs/plugin-react';
 const backendTarget = process.env.VITE_BACKEND_PROXY_TARGET || 'https://localhost:8000';
 
 export default defineConfig(({ command }) => ({
-  base: command === 'serve' ? '/' : '/super-admin/dashboard/',
+  base: '/',
   plugins: [react()],
   define: {
     // During dev (`serve`) leave empty so fetch('/api/…') goes through Vite proxy.
     // During production build use the env var or hardcoded backend origin.
     'import.meta.env.VITE_BACKEND_ORIGIN': JSON.stringify(
-      command === 'serve' ? '' : (process.env.VITE_BACKEND_ORIGIN || 'https://localhost:8000')
+      command === 'serve' ? '' : (process.env.VITE_BACKEND_ORIGIN || '')
     ),
   },
   server: {

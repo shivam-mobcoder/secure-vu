@@ -12,7 +12,16 @@ export function getStoredRole() {
     return localStorage.getItem("userRole") || null;
 }
 
+export function getStoredPermissions() {
+    try {
+        return JSON.parse(localStorage.getItem("userPermissions") || "[]");
+    } catch {
+        return [];
+    }
+}
+
 export function clearAuth() {
     localStorage.removeItem("authToken");
     localStorage.removeItem("userRole");
+    localStorage.removeItem("userPermissions");
 }

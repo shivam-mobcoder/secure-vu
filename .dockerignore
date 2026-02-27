@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.db
+.ipynb_checkpoints
+event_clips/*
+tracking/*
+face_db.npz
+*.cert.pem
+*.key.pem
+.env

@@ -1,0 +1,115 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Face Enrollment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/enroll.css">
+</head>
+
+<body>
+
+<div class="enroll-shell">
+  <section class="enroll-card">
+    <div class="enroll-header">
+      <div class="enroll-badge">Secure View</div>
+      <h3>Face Enrollment</h3>
+      <p class="enroll-subtitle">
+        Upload 1–3 clear face photos to enroll a new person.
+      </p>
+    </div>
+
+    <form id="enrollForm">
+      <label for="name">Person Name</label>
+      <input id="name" name="name" type="text" placeholder="e.g. Ritik" required>
+
+      <label for="files" class="enroll-label">Face Images</label>
+      <div class="upload-card">
+        <input type="file" id="files" name="images" multiple accept="image/*" required>
+        <div class="upload-hint">Choose 1–3 images (JPG/PNG). Max 5MB each.</div>
+        <div class="upload-count" id="fileCount">0 selected</div>
+      </div>
+
+      <div id="preview" class="preview-grid"></div>
+
+      <button id="submitBtn" type="submit">Enroll Face</button>
+
+      <div id="status" class="status"></div>
+    </form>
+  </section>
+
+  <aside class="enroll-tips">
+    <h4>Tips for best results</h4>
+    <ul>
+      <li>Use good lighting and a clear frontal face.</li>
+      <li>Remove sunglasses or heavy masks.</li>
+      <li>Different angles improve recognition.</li>
+    </ul>
+    <div class="tip-note">Photos are processed securely on the server.</div>
+  </aside>
+</div>
+
+<script>
+const form = document.getElementById("enrollForm");
+const filesInput = document.getElementById("files");
+const preview = document.getElementById("preview");
+const statusEl = document.getElementById("status");
+const btn = document.getElementById("submitBtn");
+
+filesInput.addEventListener("change", () => {
+  preview.innerHTML = "";
+  const files = Array.from(filesInput.files || []).slice(0, 3);
+  if (filesInput.files.length > 3) {
+    filesInput.value = "";
+    statusEl.textContent = "Please select up to 3 images.";
+    statusEl.style.color = "#ff6b6b";
+    document.getElementById("fileCount").textContent = "0 selected";
+    return;
+  }
+  document.getElementById("fileCount").textContent = `${files.length} selected`;
+  for (let f of files) {
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
+    preview.appendChild(img);
+  }
+});
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  statusEl.textContent = "";
+  btn.disabled = true;
+  btn.textContent = "Uploading...";
+
+  const fd = new FormData();
+  fd.append("name", document.getElementById("name").value);
+
+  for (let f of filesInput.files) {
+    fd.append("images", f);
+  }
+
+  try {
+    const postUrl = window.location.pathname || "";
+    const res = await fetch(postUrl, { method: "POST", body: fd });
+    const txt = await res.text();
+
+    statusEl.textContent = txt;
+    statusEl.style.color = res.ok ? "#4cd137" : "#ff6b6b";
+
+    if (res.ok) {
+      form.reset();
+      preview.innerHTML = "";
+    }
+
+  } catch (err) {
+    statusEl.textContent = "Upload failed.";
+    statusEl.style.color = "#ff6b6b";
+  }
+
+  btn.disabled = false;
+  btn.textContent = "Enroll Face";
+});
+</script>
+
+</body>
+</html> -->

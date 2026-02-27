@@ -28,3 +28,10 @@ dev = [
     "ruff>=0.15.2",
     "vulture>=2.14",
 ]
+
+[tool.vulture]
+exclude = [".venv", "node_modules", "frontend"]
+min_confidence = 60
+paths = ["app/"]
+sort_by_size = true
+
