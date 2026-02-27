@@ -85,23 +85,23 @@ Edit `.env` with your values:
 
 ```dotenv
 # PostgreSQL
-DB_USER=cctv_user
-DB_PASS=StrongPassword123
+DB_USER=<your-db-user>
+DB_PASS=<your-db-password>
 DB_NAME=cctv_platform
 DB_HOST=127.0.0.1
 
-# JWT Secret (generate a new one for production)
+# JWT Secret — generate with: python -c "import secrets; print(secrets.token_hex(64))"
 JWT_SECRET=<your-random-64-byte-hex>
 
 # Default accounts (created on first startup)
-SUPER_EMAIL=super@platform.com
-SUPER_PASSWORD=SuperAdmin@123
-ADMIN_EMAIL=admin@internal.com
-ADMIN_PASSWORD=AdminStrong123
+SUPER_EMAIL=<super-admin-email>
+SUPER_PASSWORD=<super-admin-password>
+ADMIN_EMAIL=<admin-email>
+ADMIN_PASSWORD=<admin-password>
 
-# RTSP Camera URLs (comma-separated per camera ID)
-# RTSP_URL_1=rtsp://admin:pass@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0
-# RTSP_URL_2=rtsp://admin:pass@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0
+# RTSP Camera URLs
+# RTSP_URL_1=rtsp://<user>:<pass>@<ip>:554/cam/realmonitor?channel=1&subtype=0
+# RTSP_URL_2=rtsp://<user>:<pass>@<ip>:554/cam/realmonitor?channel=1&subtype=0
 ```
 
 ### Step 3 — Start PostgreSQL

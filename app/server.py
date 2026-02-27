@@ -5334,16 +5334,21 @@ async def handle_offer(request):
         camera_id = None
     if camera_id is not None:
         try:
-            if (
-                AUTH_READY
-                and user_can_access_camera
-                and not await user_can_access_camera(
-                    request.get("user") or {}, camera_id
-                )
-            ):
-                return web.Response(status=403)
+            if AUTH_READY and user_can_access_camera:
+                access = await user_can_access_camera(request.get("user") or {}, camera_id)
+                if access is False:
+                    # Camera may not exist in DB (env-var configured) — only block
+                    # if the camera actually has a DB record the user lacks access to.
+                    try:
+                        from db import db_get_camera as _db_gc
+                        cam = await _db_gc(camera_id)
+                        if cam is not None:
+                            return web.Response(status=403)
+                        # Camera not in DB → env-var configured, allow
+                    except Exception:
+                        pass  # DB lookup failed, allow access
         except Exception:
-            return web.Response(status=403)
+            pass  # Don't block on DB errors
 
     # Strictly CCTV mode
     source = "cctv"
