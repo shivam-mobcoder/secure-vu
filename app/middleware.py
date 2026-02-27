@@ -2,15 +2,21 @@ import jwt
 import time
 from aiohttp import web
 from auth import JWT_SECRET, JWT_ALGO
+
 try:
     from db import db_get_user_by_id  # type: ignore
 except Exception:
     db_get_user_by_id = None
 
+import logging
+logger = logging.getLogger("middleware")
+
 PUBLIC_PATHS = (
     "/login",
     "/signup",
     "/",
+    "/home",
+    "/auth",
     "/client.html",
     "/favicon.ico",
 )
@@ -18,8 +24,10 @@ PUBLIC_PATHS = (
 
 PUBLIC_PREFIXES = (
     "/static/",
+    "/assets/",
     "/docs/",
     "/super-admin/dashboard",
+    "/admin/dashboard",
     "/event-clips/",
 )
 
@@ -33,7 +41,9 @@ async def auth_middleware(request, handler):
     if request.method == "OPTIONS":
         return web.Response(status=204)
 
-    if request.path in PUBLIC_PATHS or any(request.path.startswith(p) for p in PUBLIC_PREFIXES):
+    if request.path in PUBLIC_PATHS or any(
+        request.path.startswith(p) for p in PUBLIC_PREFIXES
+    ):
         return await handler(request)
 
     # Allow public access to enrollment links, but keep /enroll/create protected.
@@ -56,21 +66,19 @@ async def auth_middleware(request, handler):
     except Exception:
         return web.Response(status=401)
 
-    try:
-        issued_at = int(payload.get("iat", 0))
-    except Exception:
-        issued_at = 0
-    if issued_at < SERVER_START_TS:
-        return web.Response(status=401)
-
-    if db_get_user_by_id and (not payload.get("role") or payload.get("client_id") is None):
+    # Always fetch latest user info from DB to get dynamic permissions
+    if db_get_user_by_id:
         try:
-            user = await db_get_user_by_id(payload.get("user_id"))
-            if user:
-                payload["role"] = user.get("role")
-                payload["client_id"] = user.get("client_id")
-        except Exception:
-            pass
+            live_user = await db_get_user_by_id(payload.get("user_id"))
+            if live_user:
+                # Merge DB data into the request user object
+                payload["role"] = live_user.get("role")
+                payload["client_id"] = live_user.get("client_id")
+                payload["permissions"] = live_user.get("permissions") or []
+            else:
+                return web.Response(status=401)
+        except Exception as e:
+            logger.error(f"Middleware DB user fetch error: {e}")
 
     request["user"] = payload
     return await handler(request)

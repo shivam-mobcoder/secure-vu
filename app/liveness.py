@@ -52,6 +52,7 @@ LIVENESS_THRESHOLD = float(0.50)
 # Helper utilities
 # ---------------------------------------------------------------------------
 
+
 def _to_gray(image: np.ndarray) -> np.ndarray:
     if image.ndim == 2:
         return image
@@ -80,6 +81,7 @@ def _crop_face(image: np.ndarray, bbox, margin: float = 0.25) -> Optional[np.nda
 # Layer 1 — LBP texture score
 # ---------------------------------------------------------------------------
 
+
 def _compute_lbp(gray: np.ndarray, radius: int = 1, n_points: int = 8) -> np.ndarray:
     """
     Simplified uniform LBP without scikit-image.
@@ -89,8 +91,9 @@ def _compute_lbp(gray: np.ndarray, radius: int = 1, n_points: int = 8) -> np.nda
     lbp = np.zeros((h, w), dtype=np.float32)
     # Precompute offsets for n_points neighbours on a circle of `radius`
     angles = 2 * np.pi * np.arange(n_points) / n_points
-    offsets = [(int(round(radius * np.sin(a))),
-                int(round(radius * np.cos(a)))) for a in angles]
+    offsets = [
+        (int(round(radius * np.sin(a))), int(round(radius * np.cos(a)))) for a in angles
+    ]
     fp = gray.astype(np.float32)
     for bit, (dy, dx) in enumerate(offsets):
         shifted = np.roll(np.roll(fp, dy, axis=0), dx, axis=1)
@@ -123,6 +126,7 @@ def _texture_score(face_crop: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 # Layer 2 — High-frequency energy (Laplacian + DFT)
 # ---------------------------------------------------------------------------
+
 
 def _hf_score(face_crop: np.ndarray) -> float:
     """
@@ -157,6 +161,7 @@ def _hf_score(face_crop: np.ndarray) -> float:
 # Layer 3 — Blur / sharpness check
 # ---------------------------------------------------------------------------
 
+
 def _sharpness_score(face_crop: np.ndarray) -> float:
     """
     Laplacian variance of the face crop.
@@ -181,6 +186,7 @@ def _sharpness_score(face_crop: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 # Layer 4 — Specular / reflectance check
 # ---------------------------------------------------------------------------
+
 
 def _specular_score(face_crop: np.ndarray) -> float:
     """
@@ -217,6 +223,7 @@ def _specular_score(face_crop: np.ndarray) -> float:
 # Layer 5 — 3D pose plausibility (multi-frame micro-movement)
 # ---------------------------------------------------------------------------
 
+
 def _pose_variance_score(poses: list[tuple[float, float, float]]) -> float:
     """
     Across multiple frames, a real live face shows natural micro-movement
@@ -241,6 +248,7 @@ def _pose_variance_score(poses: list[tuple[float, float, float]]) -> float:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 class LivenessChecker:
     """
@@ -285,17 +293,12 @@ class LivenessChecker:
         face_crop = cv2.resize(face_crop, (128, 128))
 
         texture = _texture_score(face_crop)
-        hf      = _hf_score(face_crop)
-        sharp   = _sharpness_score(face_crop)
-        spec    = _specular_score(face_crop)
+        hf = _hf_score(face_crop)
+        sharp = _sharpness_score(face_crop)
+        spec = _specular_score(face_crop)
 
         # Weighted combination (texture + HF carry the most signal)
-        score = (
-            0.35 * texture +
-            0.30 * hf      +
-            0.20 * sharp   +
-            0.15 * spec
-        )
+        score = 0.35 * texture + 0.30 * hf + 0.20 * sharp + 0.15 * spec
         score = float(np.clip(score, 0.0, 1.0))
 
         detail = {

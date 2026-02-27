@@ -13,19 +13,13 @@ export default function AdminFeed() {
     const [loading, setLoading] = useState(true);
     const [key, setKey] = useState(0); // bump to reload iframe
 
-    // Build the URL — in dev mode route through Vite proxy to avoid mixed content;
-    // in production the backend and frontend share the same origin.
+    // Build the URL — point to the original CCTV viewer page.
+    // The static route is served by aiohttp and whitelisted in middleware.
     const token = getStoredToken();
-    const isDev = !import.meta.env.VITE_BACKEND_ORIGIN;
-    const backendOrigin = isDev
-        ? ''   // same-origin — goes through Vite proxy
-        : import.meta.env.VITE_BACKEND_ORIGIN;
-
-    // In dev: /backend-client proxies to the backend's root '/' (client.html)
-    const basePath = isDev ? '/backend-client' : '/';
+    const BACKEND = import.meta.env.VITE_BACKEND_ORIGIN || '';
     const feedUrl = token
-        ? `${backendOrigin}${basePath}?token=${encodeURIComponent(token)}`
-        : `${backendOrigin}${basePath}`;
+        ? `${BACKEND}/static/client.html?token=${encodeURIComponent(token)}`
+        : `${BACKEND}/static/client.html`;
 
     function handleReload() {
         setLoading(true);

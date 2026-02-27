@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: cctv_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-cctv_user}
+      POSTGRES_PASSWORD: ${DB_PASS:-StrongPassword123}
+      POSTGRES_DB: ${DB_NAME:-cctv_platform}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Automatically run our init scripts on first boot
+      - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql
+    networks:
+      - cctv_network
+
+  app:
+    build: .
+    container_name: cctv_app
+    restart: always
+    depends_on:
+      - db
+    environment:
+      - DB_HOST=db
+      - DB_USER=${DB_USER:-cctv_user}
+      - DB_PASS=${DB_PASS:-StrongPassword123}
+      - DB_NAME=${DB_NAME:-cctv_platform}
+      - PORT=8000
+      - EVENT_CLIP_DIR=/app/event_clips
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./event_clips:/app/event_clips
+      - ./tracking:/app/tracking
+      - ./models:/app/models
+    networks:
+      - cctv_network
+
+networks:
+  cctv_network:
+    driver: bridge
+
+volumes:
+  postgres_data:

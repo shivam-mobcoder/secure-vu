@@ -9,26 +9,6 @@ def set_pool(pool: asyncpg.Pool) -> None:
     _pool = pool
 
 
-async def init_pool() -> asyncpg.Pool:
-    pool = await asyncpg.create_pool(
-        user=os.getenv("DB_USER", "cctv_user"),
-        password=os.getenv("DB_PASS", "StrongPassword123"),
-        database=os.getenv("DB_NAME", "cctv_platform"),
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        min_size=int(os.getenv("DB_POOL_MIN", "5")),
-        max_size=int(os.getenv("DB_POOL_MAX", "20")),
-    )
-    set_pool(pool)
-    return pool
-
-
-async def close_pool() -> None:
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
-
-
 def _require_pool() -> asyncpg.Pool:
     if _pool is None:
         raise RuntimeError("Database pool not initialized")
@@ -47,12 +27,6 @@ async def db_fetchrow(q, args=()):
         return await conn.fetchrow(q, *args)
 
 
-async def db_fetch(q, args=()):
-    pool = _require_pool()
-    async with pool.acquire() as conn:
-        return await conn.fetch(q, *args)
-
-
 async def db_get_user_by_email(email):
     row = await db_fetchrow("SELECT * FROM users WHERE email=$1", (email,))
     return dict(row) if row else None
@@ -68,17 +42,28 @@ async def db_get_camera(cid):
     return dict(row) if row else None
 
 
-async def db_get_camera_for_client(cid, client_id):
-    row = await db_fetchrow(
-        "SELECT * FROM cameras WHERE id=$1 AND client_id=$2",
-        (cid, client_id),
-    )
-    return dict(row) if row else None
-
-
 async def db_user_camera_exists(uid, cid):
     row = await db_fetchrow(
         "SELECT 1 FROM user_cameras WHERE user_id=$1 AND camera_id=$2",
         (uid, cid),
     )
     return row is not None
+
+
+async def db_list_users_by_client(client_id):
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, email, role, is_active, permissions FROM users WHERE client_id=$1",
+            client_id,
+        )
+        return [dict(r) for r in rows]
+
+
+async def db_update_user_permissions(user_id, permissions):
+    import json
+
+    await db_execute(
+        "UPDATE users SET permissions=$1 WHERE id=$2",
+        (json.dumps(permissions), user_id),
+    )

@@ -29,7 +29,11 @@ class PIDTracker:
         self._save_id_map()
         return pid
 
-    def _bbox_iou(self, box_a: Tuple[float, float, float, float], box_b: Tuple[float, float, float, float]) -> float:
+    def _bbox_iou(
+        self,
+        box_a: Tuple[float, float, float, float],
+        box_b: Tuple[float, float, float, float],
+    ) -> float:
         ax1, ay1, ax2, ay2 = box_a
         bx1, by1, bx2, by2 = box_b
         inter_x1 = max(ax1, bx1)
