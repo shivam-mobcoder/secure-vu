@@ -68,7 +68,12 @@ async def login(request):
 
     token = _issue_token(user)
     return web.json_response(
-        {"token": token, "token_type": "Bearer", "expires_in": 86400}
+        {
+            "token": token,
+            "token_type": "Bearer",
+            "expires_in": 86400,
+            "permissions": user.get("permissions") or [],
+        }
     )
 
 
@@ -112,6 +117,7 @@ async def signup(request):
             "token": token,
             "token_type": "Bearer",
             "expires_in": 86400,
+            "permissions": user.get("permissions") or [],
             "user": {
                 "id": user["id"],
                 "email": user["email"],

@@ -48,3 +48,22 @@ async def db_user_camera_exists(uid, cid):
         (uid, cid),
     )
     return row is not None
+
+
+async def db_list_users_by_client(client_id):
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, email, role, is_active, permissions FROM users WHERE client_id=$1",
+            client_id,
+        )
+        return [dict(r) for r in rows]
+
+
+async def db_update_user_permissions(user_id, permissions):
+    import json
+
+    await db_execute(
+        "UPDATE users SET permissions=$1 WHERE id=$2",
+        (json.dumps(permissions), user_id),
+    )

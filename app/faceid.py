@@ -49,7 +49,7 @@ class FaceIDManager:
             return
 
         # Use local pretrained cache to avoid re-downloading
-        root = Path("pre_trained/insightface")
+        root = Path(__file__).resolve().parent.parent / "pre_trained" / "insightface"
         try:
             ort_has_cuda_ep = False
             try:

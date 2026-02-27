@@ -55,6 +55,8 @@ from urllib.parse import quote
 from aiohttp import web, WSMsgType
 from collections import deque
 from time import monotonic
+import psutil
+import subprocess
 
 # Optional auth/RBAC modules
 auth_middleware = None
@@ -264,12 +266,14 @@ def _bool_param(val, default: bool = True) -> bool:
     return default
 
 
-SERVER_CAMERA_FPS = int(os.getenv("SERVER_CAMERA_FPS", "15"))
-GRID_CAMERA_FPS = int(os.getenv("GRID_CAMERA_FPS", "12"))
+SERVER_CAMERA_FPS = int(os.getenv("SERVER_CAMERA_FPS", "30"))
+GRID_CAMERA_FPS = int(os.getenv("GRID_CAMERA_FPS", "30"))   # HD: full 30 fps for all views
 SERVER_CAMERA_WIDTH = int(os.getenv("SERVER_CAMERA_WIDTH", "1280"))
 SERVER_CAMERA_HEIGHT = int(os.getenv("SERVER_CAMERA_HEIGHT", "720"))
-GRID_CAMERA_WIDTH = int(os.getenv("GRID_CAMERA_WIDTH", "640"))
-GRID_CAMERA_HEIGHT = int(os.getenv("GRID_CAMERA_HEIGHT", "360"))
+
+# --- Output Resolution (HD: 1280×720 for all views) ---
+GRID_CAMERA_WIDTH = int(os.getenv("GRID_CAMERA_WIDTH", "1280"))
+GRID_CAMERA_HEIGHT = int(os.getenv("GRID_CAMERA_HEIGHT", "720"))
 FOCUS_CAMERA_WIDTH = int(os.getenv("FOCUS_CAMERA_WIDTH", str(SERVER_CAMERA_WIDTH)))
 FOCUS_CAMERA_HEIGHT = int(os.getenv("FOCUS_CAMERA_HEIGHT", str(SERVER_CAMERA_HEIGHT)))
 RTSP_OPEN_TIMEOUT_MS = _int_env("RTSP_OPEN_TIMEOUT_MS", 5000)
@@ -286,10 +290,36 @@ stats_counters = {
     "outgoing_frames": 0,
 }
 perf_lock = threading.Lock()
+
+def _get_hardware_stats():
+    """Returns a dict of current CPU, RAM, and GPU usage metrics."""
+    stats = {
+        "cpu_percent": psutil.cpu_percent(),
+        "ram_percent": psutil.virtual_memory().percent,
+        "gpu_util": "N/A",
+        "gpu_mem": "N/A"
+    }
+    try:
+        # Quick non-blocking call to nvidia-smi if available
+        # Format: utilization.gpu, memory.used, memory.total
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+            encoding="utf-8", stderr=subprocess.STDOUT
+        ).strip().split("\n")[0]
+        data = [x.strip() for x in out.split(",")]
+        if len(data) >= 3:
+            stats["gpu_util"] = f"{data[0]}%"
+            stats["gpu_mem"] = f"{data[1]}/{data[2]}MB"
+    except Exception:
+        pass
+    return stats
+
+
 perf_counters = {
     "frames": 0,
     "resize_ms": 0.0,
     "yolo_ms": 0.0,
+    "track_ms": 0.0,
     "faceid_ms": 0.0,
     "draw_ms": 0.0,
     "total_ms": 0.0,
@@ -329,21 +359,25 @@ FACE_ENABLE = os.getenv("FACE_ENABLE", "1").strip() == "1"
 # FaceID can be very expensive when ONNXRuntime is CPU-only.
 # Default to a slower cadence for better FPS; override via env.
 # Increased to 5 for better responsiveness as per user request (was 90)
-FACE_EVERY_N_FRAMES = _int_env("FACE_EVERY_N_FRAMES", 10)
+FACE_EVERY_N_FRAMES = _int_env("FACE_EVERY_N_FRAMES", 5)
 
 # YOLO: default to smaller input for higher FPS; override via env.
-YOLO_PROCESS_EVERY_N_FRAMES = _int_env("YOLO_PROCESS_EVERY_N_FRAMES", 3)
+YOLO_PROCESS_EVERY_N_FRAMES = _int_env("YOLO_PROCESS_EVERY_N_FRAMES", 1)
 YOLO_INPUT_RESOLUTION = (
-    _int_env("YOLO_INPUT_WIDTH", 640),
-    _int_env("YOLO_INPUT_HEIGHT", 640),
+    _int_env("YOLO_INPUT_WIDTH", 1280),
+    _int_env("YOLO_INPUT_HEIGHT", 1280),
 )
 FOCUS_YOLO_INPUT_RESOLUTION = (
-    _int_env("FOCUS_YOLO_INPUT_WIDTH", 640),
-    _int_env("FOCUS_YOLO_INPUT_HEIGHT", 640),
+    _int_env("FOCUS_YOLO_INPUT_WIDTH", 1280),
+    _int_env("FOCUS_YOLO_INPUT_HEIGHT", 1280),
 )
-YOLO_MIN_CONF = float(os.getenv("YOLO_MIN_CONF", "0.0"))
+# Minimum confidence for YOLO detections passed to ByteTracker.
+# Raised to 0.25 to eliminate false positives from the single-class
+# person model.  ByteTracker's rescue pool still handles 0.15–0.25
+# range detections that YOLO passes through (BT_TRACK_LOW_THRESH=0.15).
+YOLO_MIN_CONF = float(os.getenv("YOLO_MIN_CONF", "0.25"))
 PERSON_CLASS_IDS = set(_parse_int_list_env("PERSON_CLASS_IDS", default=""))
-OUTGOING_TRACK_FPS = _int_env("OUTGOING_TRACK_FPS", 20)
+OUTGOING_TRACK_FPS = _int_env("OUTGOING_TRACK_FPS", 30)
 
 # Performance/latency tuning
 PROCESS_FRAME_DEBUG = os.getenv("PROCESS_FRAME_DEBUG", "0").strip() == "1"
@@ -375,6 +409,9 @@ WORK_HYBRID_MOTION_WEIGHT = float(os.getenv("WORK_HYBRID_MOTION_WEIGHT", "0.35")
 WORK_HANDOFF_POOL_SEC = float(os.getenv("WORK_HANDOFF_POOL_SEC", "12.0"))
 WORK_HANDOFF_MAX_DIST_PX = float(os.getenv("WORK_HANDOFF_MAX_DIST_PX", "260"))
 WORK_DEDUPE_IOU = float(os.getenv("WORK_DEDUPE_IOU", "0.72"))
+
+
+
 ALERT_LINE_ZONE_MIN_GAP = float(os.getenv("ALERT_LINE_ZONE_MIN_GAP", "0.30"))
 ALERT_WEBROI_MIN_GAP = float(
     os.getenv("ALERT_WEBROI_MIN_GAP", str(ALERT_LINE_ZONE_MIN_GAP))
@@ -393,7 +430,7 @@ EVENT_CLIP_SECONDS = float(os.getenv("EVENT_CLIP_SECONDS", "8.0"))
 EVENT_CLIP_PRE_SECONDS = float(os.getenv("EVENT_CLIP_PRE_SECONDS", "6.0"))
 EVENT_CLIP_POST_SECONDS = max(0.0, EVENT_CLIP_SECONDS - EVENT_CLIP_PRE_SECONDS)
 EVENT_CLIP_FPS = max(1, _int_env("EVENT_CLIP_FPS", 6))
-EVENT_CLIP_JPEG_QUALITY = max(40, min(95, _int_env("EVENT_CLIP_JPEG_QUALITY", 75)))
+EVENT_CLIP_JPEG_QUALITY = max(40, min(95, _int_env("EVENT_CLIP_JPEG_QUALITY", 92)))
 EVENT_CLIP_RETENTION_HOURS = max(1, _int_env("EVENT_CLIP_RETENTION_HOURS", 24))
 EVENT_CLIP_DRAW_OVERLAYS = os.getenv("EVENT_CLIP_DRAW_OVERLAYS", "1").strip() == "1"
 EVENT_CLIP_DIR = Path(
@@ -401,6 +438,26 @@ EVENT_CLIP_DIR = Path(
         "EVENT_CLIP_DIR", str(Path(__file__).resolve().parent.parent / "event_clips")
     )
 )
+
+# Optional runtime-persisted feature flags (so UI toggles survive restarts).
+# This is separate from .env so operators can flip features without redeploy.
+RUNTIME_FLAGS_FILE = Path(__file__).resolve().parent.parent / "config" / "runtime_flags.json"
+
+
+def _load_runtime_flags() -> None:
+    global EVENT_CLIP_ENABLE
+    try:
+        if not RUNTIME_FLAGS_FILE.exists():
+            return
+        data = json.loads(RUNTIME_FLAGS_FILE.read_text(encoding="utf-8") or "{}")
+        if isinstance(data, dict) and "event_clip_enable" in data:
+            EVENT_CLIP_ENABLE = bool(data.get("event_clip_enable"))
+    except Exception:
+        # Never block server start on optional runtime flags.
+        return
+
+
+_load_runtime_flags()
 ANALYTICS_ALL_CCTV = os.getenv("ANALYTICS_ALL_CCTV", "1").strip() == "1"
 ANALYTICS_CAMERA_IDS = _parse_int_list_env("ANALYTICS_CAMERA_IDS", "1,2,3,4")
 
@@ -432,6 +489,28 @@ def _load_bytetrack_args() -> SimpleNamespace:
         data = yaml.safe_load(cfg_path.read_text()) or {}
     except Exception:
         data = {}
+    # ── Optimised multi-person tracking parameters for single-class person model ─
+    # track_high_thresh: detections ≥ this are "high confidence" — used to create
+    #   new tracks and maintain existing ones.  Raised to 0.35 so random low-conf
+    #   noise doesn't create phantom person tracks.
+    # track_low_thresh: detections in [track_low_thresh, track_high_thresh) form
+    #   the "rescue pool" — they can re-link lost tracks but won't create new ones.
+    #   Raised to 0.15 to cut out near-zero-confidence false positives.
+    # new_track_thresh: minimum confidence to *initialise* a brand-new track.
+    #   Set equal to track_high_thresh (0.35).
+    # track_buffer 90 (3 s at 30 fps): keeps a lost track alive through brief
+    #   occlusions / detection gaps, so the same ID is recovered when the person
+    #   reappears rather than getting a new ID.
+    # match_thresh 0.85 (> previous 0.7): accepts detection→track matches with
+    #   IoU ≥ 0.15.  More permissive matching means a track can be re-linked even
+    #   if the person moved somewhat between frames — the primary fix for the
+    #   "box flickers / new ID every re-appearance" symptom.
+    data["track_high_thresh"] = float(os.getenv("BT_TRACK_HIGH_THRESH", "0.35"))
+    data["track_low_thresh"]  = float(os.getenv("BT_TRACK_LOW_THRESH",  "0.15"))
+    data["new_track_thresh"]  = float(os.getenv("BT_NEW_TRACK_THRESH",  "0.35"))
+    data["track_buffer"]      = int(os.getenv("BT_TRACK_BUFFER",        "90"))
+    data["match_thresh"]      = float(os.getenv("BT_MATCH_THRESH",      "0.85"))
+    data.setdefault("fuse_score", True)
     _bytetrack_args = SimpleNamespace(**data)
     return _bytetrack_args
 
@@ -658,14 +737,8 @@ async def create_enroll_link(request):
 
 
 async def enroll_page(request):
-    token = request.match_info.get("token", "")
-    meta = enroll_tokens.get(token)
-    if not meta or time.time() > (
-        meta.get("exp", 0) if isinstance(meta, dict) else meta
-    ):
-        return web.Response(text="Link expired")
-    html = (REPO_ROOT / "static" / "enroll.html").read_text()
-    return web.Response(text=html, content_type="text/html")
+    """Serve the React SPA for /enroll/:token so SelfEnrollment.jsx handles it."""
+    return await _serve_react_spa(request)
 
 
 async def enroll_validate_token(request):
@@ -691,8 +764,9 @@ async def enroll_token_frames(request):
 
     try:
         body = await request.json()
-    except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+    except Exception as e:
+        logger.error(f"[ENROLL-TOKEN] JSON decode error: {e}")
+        return web.json_response({"error": "invalid JSON", "details": str(e)}, status=400)
 
     raw_name = (body.get("name") or "").strip()
     if not raw_name:
@@ -874,7 +948,7 @@ async def enroll_upload(request):
 
 
 def _create_face_app() -> FaceAnalysis:
-    root = "pre_trained/insightface"
+    root = str(REPO_ROOT / "pre_trained" / "insightface")
     ort_has_cuda_ep = False
     try:
         import onnxruntime as ort
@@ -988,8 +1062,25 @@ def enroll_face(name: str, frames: list, client_id=None):
 pid_smooth = {}  # pid -> (x1,y1,x2,y2)
 pid_smooth_lock = threading.Lock()
 
+# Tunable via env:
+#   BBOX_SMOOTH_ALPHA : 0.0-1.0  weight on previous position (higher → smoother/less flicker)
+#   BBOX_JUMP_THRESH  : multiplier of bbox height; if centre moves further than this,
+#                       snap immediately (prevents "box between people" on ID swaps)
+_SMOOTH_ALPHA = float(os.getenv("BBOX_SMOOTH_ALPHA", "0.75"))
+_SMOOTH_JUMP_THRESH = float(os.getenv("BBOX_JUMP_THRESH", "1.5"))
 
-def smooth_bbox(pid, box, alpha=0.7):
+
+def smooth_bbox(pid, box, alpha=_SMOOTH_ALPHA):
+    """EMA bbox smoothing with ID-swap / large-jump detection.
+
+    alpha: weight on the *previous* position (0.6 default gives smooth motion
+    with ≤ 1-frame lag for a person walking at normal speed).
+
+    When the detected centre jumps by more than ``_SMOOTH_JUMP_THRESH × prev_height``
+    we snap immediately to the new position instead of blending.  This eliminates
+    the "ghost box drifting between two people" artefact that occurs when
+    ByteTracker swaps track IDs for closely adjacent persons.
+    """
     with pid_smooth_lock:
         if pid not in pid_smooth:
             pid_smooth[pid] = box
@@ -997,6 +1088,20 @@ def smooth_bbox(pid, box, alpha=0.7):
 
         px1, py1, px2, py2 = pid_smooth[pid]
         x1, y1, x2, y2 = box
+
+        # ── Jump detection (ID-swap guard) ───────────────────────────────────
+        old_cx = (px1 + px2) * 0.5
+        old_cy = (py1 + py2) * 0.5
+        new_cx = (x1 + x2) * 0.5
+        new_cy = (y1 + y2) * 0.5
+        prev_h = max(1.0, float(py2 - py1))
+        jump = ((new_cx - old_cx) ** 2 + (new_cy - old_cy) ** 2) ** 0.5
+        if jump > _SMOOTH_JUMP_THRESH * prev_h:
+            # Centre moved more than ~1.2× the person's height in one frame —
+            # almost certainly an ID swap.  Snap to new position to avoid the
+            # interpolated box hanging in the space between two people.
+            pid_smooth[pid] = box
+            return box
 
         sx1 = int(alpha * px1 + (1 - alpha) * x1)
         sy1 = int(alpha * py1 + (1 - alpha) * y1)
@@ -1026,6 +1131,52 @@ def force_h264(pc):
                     logger.debug(f"setCodecPreferences failed: {e}")
     except Exception as e:
         logger.debug(f"force_h264 error: {e}")
+
+
+# Target WebRTC video bitrate in kbps.  6 Mbps gives crisp 1280×720 @ 30fps.
+# Raise WEBRTC_VIDEO_KBPS env var if your LAN can handle more (e.g. 10000 for
+# near-lossless), lower it if clients are on Wi-Fi / mobile.
+WEBRTC_VIDEO_KBPS = _int_env("WEBRTC_VIDEO_KBPS", 6000)
+
+
+def _munge_sdp_bitrate(sdp: str, video_kbps: int) -> str:
+    """Inject bandwidth hints into the video section of an SDP string.
+
+    Inserts:
+      b=AS:<kbps>           — application-specific max kbps (RFC 4566)
+      b=TIAS:<bps>          — transport-independent application-specific (RFC 3890)
+
+    aiortc's VP8/H264 encoder reads the b=AS line from the local description
+    and raises its target bitrate accordingly, which is the primary lever for
+    improving outgoing video quality.
+    """
+    eol = "\r\n" if "\r\n" in sdp else "\n"
+    lines = sdp.replace("\r\n", "\n").splitlines()
+    out: list[str] = []
+    in_video = False
+    bw_inserted = False
+    for line in lines:
+        if line.startswith("m=video"):
+            in_video = True
+            bw_inserted = False
+            out.append(line)
+            continue
+        if line.startswith("m=") and not line.startswith("m=video"):
+            in_video = False
+        # Insert bandwidth lines immediately after the connection line (c=)
+        # inside the video section.  If there is no c= line, insert after m=.
+        if in_video and not bw_inserted:
+            if line.startswith("c=") or line.startswith("a="):
+                # Remove any existing bandwidth lines for this section first.
+                if not line.startswith("b="):
+                    out.append(f"b=AS:{video_kbps}")
+                    out.append(f"b=TIAS:{video_kbps * 1000}")
+                    bw_inserted = True
+        if line.startswith("b=") and in_video and not bw_inserted:
+            # Skip old bandwidth lines — we'll replace them.
+            continue
+        out.append(line)
+    return eol.join(out)
 
 
 roi_state = {}  # Remove roi_polygons entirely
@@ -1143,6 +1294,18 @@ if use_cuda:
         print("✅ GPU warmed up")
     except Exception as e:
         print(f"⚠️ YOLO GPU warm-up failed: {e}")
+
+    # Optional: torch.compile for ~20-40 % extra GPU throughput (PyTorch ≥ 2.0).
+    # "reduce-overhead" removes Python-side interpreter overhead on every call;
+    # fullgraph=False is safe for models with dynamic control flow.
+    if hasattr(torch, "compile"):
+        try:
+            yolo_model.model = torch.compile(
+                yolo_model.model, mode="reduce-overhead", fullgraph=False
+            )
+            print("⚡ YOLO model compiled with torch.compile (reduce-overhead)")
+        except Exception as _ce:
+            print(f"⚠️ torch.compile skipped: {_ce}")
 
 # Prepare InsightFace now that we know whether CUDA is available
 insightface_ctx_id = -1
@@ -2065,6 +2228,60 @@ def _cleanup_event_clip_files(now_ts: float | None = None) -> None:
         pass
 
 
+def _persist_runtime_flags() -> None:
+    """Persist runtime feature flags (best-effort)."""
+    try:
+        RUNTIME_FLAGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "event_clip_enable": bool(EVENT_CLIP_ENABLE),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        RUNTIME_FLAGS_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _set_event_clips_enabled(enabled: bool, *, persist: bool = True) -> bool:
+    """Enable/disable clip capture. When disabled, pending/buffered clip state is cleared."""
+    global EVENT_CLIP_ENABLE
+    EVENT_CLIP_ENABLE = bool(enabled)
+    if not EVENT_CLIP_ENABLE:
+        try:
+            with event_clip_lock:
+                event_clip_pending.clear()
+                event_clip_buffers.clear()
+                event_clip_last_push.clear()
+        except Exception:
+            pass
+    if persist:
+        _persist_runtime_flags()
+    return bool(EVENT_CLIP_ENABLE)
+
+
+async def event_clips_get_settings(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin", "member"])
+    # If RBAC is enabled, require permission to connect to the CCTV UI anyway.
+    if AUTH_READY and can and not can(user, "alerts", "view"):
+        return web.Response(status=403)
+    return web.json_response({"enabled": bool(EVENT_CLIP_ENABLE)})
+
+
+async def event_clips_set_settings(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin"])
+    if AUTH_READY and can and not can(user, "rules", "manage"):
+        return web.Response(status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+
+    enabled = bool((body or {}).get("enabled", True))
+    final = _set_event_clips_enabled(enabled, persist=True)
+    return web.json_response({"enabled": bool(final)})
+
+
 def _queue_event_clip(
     camera_id,
     event_text: str,
@@ -2484,13 +2701,15 @@ def _cache_pid_name(pid: int, candidate_name: str, timestamp: float) -> str:
 
 def _format_timer(seconds: float) -> str:
     try:
-        total = max(0, int(seconds))
+        total = max(0, round(seconds))
     except Exception:
         total = 0
     h = total // 3600
     m = (total % 3600) // 60
     s = total % 60
     return f"{h:02d}:{m:02d}:{s:02d}"
+
+
 
 
 def _update_work_timer(pid: str | int, timestamp: float, active: bool) -> float:
@@ -3028,31 +3247,16 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     if x2 <= x1 or y2 <= y1:
         return
 
-    # ── Corner brackets ───────────────────────────────────────────────────────
+    # ── Full rectangle ─────────────────────────────────────────────────────────
     bw = max(1, box_thickness)
-    corner = max(8, min(20, int((x2 - x1) * 0.15), int((y2 - y1) * 0.15)))
-    pts = [  # (start, end) for each of the 8 bracket lines
-        ((x1, y1), (x1 + corner, y1)),  # TL horizontal
-        ((x1, y1), (x1, y1 + corner)),  # TL vertical
-        ((x2, y1), (x2 - corner, y1)),  # TR horizontal
-        ((x2, y1), (x2, y1 + corner)),  # TR vertical
-        ((x1, y2), (x1 + corner, y2)),  # BL horizontal
-        ((x1, y2), (x1, y2 - corner)),  # BL vertical
-        ((x2, y2), (x2 - corner, y2)),  # BR horizontal
-        ((x2, y2), (x2, y2 - corner)),  # BR vertical
-    ]
-    for p1, p2 in pts:
-        cv2.line(frame, p1, p2, color, bw, lineType=cv2.LINE_AA)
-
-    # Thin full-perimeter outline (1 px) for clarity against bright backgrounds
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1, lineType=cv2.LINE_AA)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, bw, lineType=cv2.LINE_AA)
 
     # ── Label background ──────────────────────────────────────────────────────
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.55
+    font_scale = 0.40
     font_thick = 1
     (txt_w, txt_h), baseline = cv2.getTextSize(label, font, font_scale, font_thick)
-    pad = 4
+    pad = 3
 
     # Default: label above the box
     lbl_x1 = x1
@@ -3068,16 +3272,13 @@ def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     lbl_x2 = min(w - 1, lbl_x1 + txt_w + pad * 2)
     lbl_x1 = max(0, lbl_x1)
 
-    # Semi-transparent filled background — ROI-only blend (NOT full-frame copy)
+    # Solid dark label background — fast, no alpha-blend copy needed.
     ry1 = max(0, lbl_y1)
     ry2 = min(h, lbl_y2)
     rx1 = max(0, lbl_x1)
     rx2 = min(w, lbl_x2)
     if ry2 > ry1 and rx2 > rx1:
-        roi = frame[ry1:ry2, rx1:rx2]
-        overlay_roi = roi.copy()
-        cv2.rectangle(overlay_roi, (0, 0), (rx2 - rx1, ry2 - ry1), color, -1)
-        cv2.addWeighted(overlay_roi, 0.65, roi, 0.35, 0, roi)
+        cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (0, 0, 0), -1)
 
     # ── Text (shadow + foreground) ────────────────────────────────────────────
     txt_x = lbl_x1 + pad
@@ -3111,10 +3312,11 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
     for det in cached or []:
         try:
             x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
-            name = det.get("display_name", det.get("name", "Unknown"))
+            raw_name = det.get("name", "Unknown")
             pid = det.get("pid")
             is_person = bool(det.get("is_person"))
             entity_key = det.get("work_key") or f"pid:{pid}"
+            is_known = is_person and raw_name != "Unknown"
 
             is_in_roi = False
             if roi_box and is_person:
@@ -3125,10 +3327,10 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
 
             if is_in_roi:
                 color = (0, 165, 255)
-                draw_label = f"{name} (IN ROI)"
+                draw_label = f"{raw_name} (IN ROI)" if is_known else "IN ROI"
             else:
                 color = (0, 255, 0)
-                draw_label = f"{name}"
+                draw_label = raw_name if is_known else ""
 
             cross_tag = (
                 _get_cross_overlay(camera_id, entity_key, now_ts) if is_person else None
@@ -3141,7 +3343,10 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
                 work_key = det.get("work_key")
                 if work_key is not None:
                     work_seconds = _peek_work_timer(str(work_key), now_ts)
-                draw_label = f"{draw_label} {_format_timer(work_seconds)}"
+                timer_txt = _format_timer(work_seconds)
+                draw_label = f"{draw_label} {timer_txt}".strip()
+
+
 
             if cross_tag:
                 flash_on = (CROSS_OVERLAY_FLASH_HZ <= 0.0) or (
@@ -3210,7 +3415,7 @@ def process_frame(
         or now - cs["yolo_time"] > 1.0
     )
     if not should_process:
-        if cs["draw_dets"] and (now - cs["draw_time"]) <= YOLO_DET_PERSIST_SECONDS:
+        if cs["draw_dets"]:
             _draw_cached_dets(frame, cs["draw_dets"], roi_box, camera_id)
         try:
             _event_clip_on_frame(camera_id, frame, time.time())
@@ -3260,6 +3465,12 @@ def process_frame(
         return str(cls_id) if cls_id is not None else "object"
 
     use_tiling = bool(YOLO_TILING and no_pre_resize)
+    # Pass the ByteTracker low-threshold as the model-level NMS confidence floor.
+    # This removes near-zero-confidence noise *inside* YOLO before it ever reaches
+    # ByteTracker, keeping the tracker's state clean without throwing away the
+    # low-confidence detections that ByteTracker needs for its rescue pool.
+    # Default raised to 0.15 in sync with BT_TRACK_LOW_THRESH.
+    _yolo_conf_thr = max(0.01, float(os.getenv("BT_TRACK_LOW_THRESH", "0.15")))
     with torch.inference_mode():
         with torch.cuda.amp.autocast(enabled=amp_enabled):
             if use_tiling:
@@ -3275,7 +3486,7 @@ def process_frame(
                     tile = frame[y0:y1, x0:x1]
                     if tile.size == 0:
                         continue
-                    results = yolo_model(tile, imgsz=yolo_imgsz, verbose=False)[0]
+                    results = yolo_model(tile, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
                     for b in results.boxes:
                         cls_id = None
                         conf = None
@@ -3307,7 +3518,7 @@ def process_frame(
                 processed_h, processed_w = orig_h, orig_w
                 results = None
             else:
-                results = yolo_model(small, imgsz=yolo_imgsz, verbose=False)[0]
+                results = yolo_model(small, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
     # Note: torch.cuda.synchronize() removed — accessing tensor data (.tolist(),
     # .cls, .conf) already triggers an implicit sync.  The explicit call was
     # adding ~2-5 ms of pure wait per frame across all 4 camera threads.
@@ -3362,8 +3573,11 @@ def process_frame(
                 }
             )
 
+    t_pre_track = time.perf_counter()
     if USE_BYTETRACK:
         raw_dets = _apply_bytetrack(raw_dets, frame, camera_id, _label_for)
+    t_track = time.perf_counter()
+    track_ms_this = (t_track - t_pre_track) * 1000.0
 
     raw_dets = _dedupe_overlapping_dets(raw_dets, iou_thr=WORK_DEDUPE_IOU)
 
@@ -3451,6 +3665,8 @@ def process_frame(
         # else: lock busy — skip face-id this frame, use cached names
     else:
         face_time_total_ms = 0.0
+
+
 
     det_items = []
     for i, det in enumerate(raw_dets):
@@ -3592,10 +3808,10 @@ def process_frame(
 
         if is_in_roi:
             color = (0, 165, 255)
-            draw_label = f"{display_name} (IN ROI)"
+            draw_label = f"{display_name} (IN ROI)" if name != "Unknown" else "IN ROI"
         else:
             color = (0, 255, 0)
-            draw_label = f"{display_name}"
+            draw_label = display_name if name != "Unknown" else ""
 
         cross_tag = (
             _get_cross_overlay(camera_id, alert_entity_key, ts) if is_person else None
@@ -3608,7 +3824,9 @@ def process_frame(
             color = (0, 0, 255) if flash_on else (0, 180, 255)
 
         if WORK_TIMER_ENABLE and is_person:
-            draw_label = f"{draw_label} {work_timer_txt}"
+            draw_label = f"{draw_label} {work_timer_txt}".strip()
+
+
 
         thickness = (
             3
@@ -3657,6 +3875,7 @@ def process_frame(
                 "is_plate": is_plate,
                 "work_seconds": work_seconds,
                 "work_key": work_key,
+
             }
         )
 
@@ -3682,6 +3901,7 @@ def process_frame(
                 "is_person": d.get("is_person"),
                 "work_seconds": d.get("work_seconds", 0.0),
                 "work_key": d.get("work_key"),
+
             }
             for d in det_items
         ]
@@ -3711,30 +3931,32 @@ def process_frame(
             total_ms = (t_draw - t0) * 1000.0
             resize_ms = (t_resize - t0) * 1000.0
             yolo_ms = (t_yolo - t_resize) * 1000.0
-            draw_ms = max(0.0, (t_draw - t_yolo) * 1000.0 - face_time_total_ms)
+            draw_ms = max(0.0, (t_draw - t_yolo) * 1000.0 - face_time_total_ms - track_ms_this)
             with perf_lock:
                 perf_counters["frames"] += 1
                 perf_counters["resize_ms"] += resize_ms
                 perf_counters["yolo_ms"] += yolo_ms
+                perf_counters["track_ms"] += track_ms_this
                 perf_counters["faceid_ms"] += face_time_total_ms
                 perf_counters["draw_ms"] += draw_ms
                 perf_counters["total_ms"] += total_ms
         except Exception:
             pass
-    try:
-        # Offload event clip encoding to a background thread so JPEG encode
-        # does not block the processing thread and cause frame drops.
-        import concurrent.futures as _cf
+    if EVENT_CLIP_ENABLE:
+        try:
+            # Offload event clip encoding to a background thread so JPEG encode
+            # does not block the processing thread and cause frame drops.
+            import concurrent.futures as _cf
 
-        _clip_pool = getattr(_event_clip_on_frame, "_pool", None)
-        if _clip_pool is None:
-            _clip_pool = _cf.ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix="clip"
-            )
-            _event_clip_on_frame._pool = _clip_pool
-        _clip_pool.submit(_event_clip_on_frame, camera_id, frame.copy(), time.time())
-    except Exception:
-        pass
+            _clip_pool = getattr(_event_clip_on_frame, "_pool", None)
+            if _clip_pool is None:
+                _clip_pool = _cf.ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="clip"
+                )
+                _event_clip_on_frame._pool = _clip_pool
+            _clip_pool.submit(_event_clip_on_frame, camera_id, frame.copy(), time.time())
+        except Exception:
+            pass
     return frame
 
 
@@ -3776,29 +3998,8 @@ async def process_alert_queue():
         logger.error(f"Alert queue processor error: {e}")
 
 async def processing_loop(latest_holder, stop_event):
-    last_ts = 0
-    frame_id = 0
-    loop = asyncio.get_running_loop()
-
-    while not stop_event.is_set():
-        item = latest_holder.get("frame")
-        ts = latest_holder.get("ts", 0)
-
-        if item is None or ts == last_ts:
-            await asyncio.sleep(0.005)
-            continue
-
-        last_ts = ts
-        frame_id += 1
-
-        if frame_id % 5 != 0:
-            continue
-
-        await loop.run_in_executor(
-            None,
-            process_frame,
-            item,
-        )
+    """Legacy stub — kept for backward-compat import but never called."""
+    pass
 
 
 # --------------------------------------------------
@@ -3886,31 +4087,6 @@ class SharedServerCamera:
         self._av_stream = None
         self._av_frames = None
         self._opened_index = None
-
-    def _try_open_any(self):
-        self._release_cap()
-
-        def _open_rtsp(url: str) -> cv2.VideoCapture | None:
-            cap = cv2.VideoCapture()
-            try:
-                # Set timeouts (ms) where supported by OpenCV backend
-                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, float(RTSP_OPEN_TIMEOUT_MS))
-                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, float(RTSP_READ_TIMEOUT_MS))
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                cap.set(cv2.CAP_PROP_FPS, 30)
-            except Exception:
-                pass
-            try:
-                cap.open(url, cv2.CAP_FFMPEG)
-            except Exception:
-                try:
-                    cap.release()
-                except Exception:
-                    pass
-                return None
-            return cap if cap.isOpened() else None
-
-        return False
 
     def _make_cap(self):
         """Open the video source and return a ready cv2.VideoCapture, or None.
@@ -4015,7 +4191,6 @@ class SharedServerCamera:
         target_fps = int(SERVER_CAMERA_FPS) if self._process else int(GRID_CAMERA_FPS)
         processing_fps = max(1, min(target_fps, int(PROCESSING_FPS)))
         target_dt = 1.0 / processing_fps
-        last_t = 0.0
         out_w = FOCUS_CAMERA_WIDTH if self._process else GRID_CAMERA_WIDTH
         out_h = FOCUS_CAMERA_HEIGHT if self._process else GRID_CAMERA_HEIGHT
 
@@ -4032,13 +4207,18 @@ class SharedServerCamera:
         )
         cap_thread.start()
 
+        # Use monotonic clock with drift correction for jitter-free pacing.
+        next_send_t = monotonic()
+
         try:
             while not self._stop_evt.is_set():
-                now = time.time()
-                sleep_t = target_dt - (now - last_t)
-                if sleep_t > 0:
-                    time.sleep(sleep_t)
-                last_t = time.time()
+                now_m = monotonic()
+                wait = next_send_t - now_m
+                if wait > 0:
+                    time.sleep(wait)
+                # Advance to next slot; if we fell behind, skip to now
+                # to avoid a burst of back-to-back frames.
+                next_send_t = max(next_send_t + target_dt, monotonic())
 
                 # Read the freshest raw frame from the capture thread.
                 frame = None
@@ -4066,7 +4246,13 @@ class SharedServerCamera:
                     processed = frame
 
                 try:
-                    processed = cv2.resize(processed, (out_w, out_h))
+                    # Use high-quality interpolation for sharp output.
+                    h_in, w_in = processed.shape[:2]
+                    if w_in > out_w or h_in > out_h:
+                        interp = cv2.INTER_AREA      # best for downscaling
+                    else:
+                        interp = cv2.INTER_LANCZOS4   # best for upscaling
+                    processed = cv2.resize(processed, (out_w, out_h), interpolation=interp)
                 except Exception:
                     pass
 
@@ -4097,9 +4283,11 @@ def _get_shared_cctv_camera(
         cam_id = int(camera_id) if camera_id is not None else 1
     except Exception:
         cam_id = 1
-    # subtype=0 for analytics (active focus), subtype=1 for grid/preview
-    subtype = 0 if process else 1
-    rtsp_url = _get_rtsp_url(cam_id, subtype=subtype)
+    # Always use subtype=0 (main HD stream) for maximum quality on all views.
+    # subtype=1 (sub-stream) was previously used for the grid but produced
+    # a low-resolution / low-bitrate feed.  The main stream is used for both
+    # focus (analytics) and grid (preview) views.
+    rtsp_url = _get_rtsp_url(cam_id, subtype=0)
     key = (cam_id, bool(process))
     with _shared_cctv_lock:
         cam = _shared_server_cameras.get(key)
@@ -4155,6 +4343,10 @@ def _stop_background_cctv_analytics() -> None:
             pass
 
 
+# Standard RTP clock rate for jitter-free PTS spacing.
+_VIDEO_CLOCK_RATE = 90000
+
+
 class SharedServerCameraTrack(VideoStreamTrack):
     def __init__(
         self, fps=SERVER_CAMERA_FPS, camera_id: int | None = None, process: bool = True
@@ -4162,7 +4354,11 @@ class SharedServerCameraTrack(VideoStreamTrack):
         super().__init__()
         self.fps = int(fps)
         self.i = 0
-        self.time_base = Fraction(1, max(1, self.fps))
+        # Use the standard 90 kHz RTP clock for perfectly uniform PTS spacing.
+        # Each frame advances by exactly (_VIDEO_CLOCK_RATE / fps) ticks,
+        # which eliminates jitter regardless of when recv() is actually called.
+        self.time_base = Fraction(1, _VIDEO_CLOCK_RATE)
+        self._pts_step = _VIDEO_CLOCK_RATE // max(1, self.fps)
         self._closed = False
         self._camera_id = camera_id
         self._process = bool(process)
@@ -4189,7 +4385,8 @@ class SharedServerCameraTrack(VideoStreamTrack):
         frame = self._shared_camera.get_latest()
         vf = VideoFrame.from_ndarray(frame, format="bgr24")
         self.i += 1
-        vf.pts = self.i
+        # Clock-aligned PTS: perfectly uniform spacing = no jitter.
+        vf.pts = self.i * self._pts_step
         vf.time_base = self.time_base
         return vf
 
@@ -4206,21 +4403,19 @@ class SharedServerCameraTrack(VideoStreamTrack):
 # --------------------------------------------------
 # HTTP ROUTES
 # --------------------------------------------------
-async def index(request):
-    with open(REPO_ROOT / "static" / "client.html", "r") as f:
-        return web.Response(text=f.read(), content_type="text/html")
+REACT_DIST = REPO_ROOT / "frontend" / "superadmin-react" / "dist"
 
 
-async def super_admin_dashboard_page(request):
-    react_dist = REPO_ROOT / "frontend" / "superadmin-react" / "dist"
-
-    # Serve static assets/files emitted by Vite build first.
+async def _serve_react_spa(request):
+    """Serve the React SPA.  First check if the request matches a real file
+    inside the Vite dist directory (JS/CSS bundles, images, etc.).  If not,
+    serve the SPA index.html so React Router handles the path client-side."""
     tail = (request.match_info.get("tail") or "").lstrip("/")
-    if tail and react_dist.exists():
+    if tail and REACT_DIST.exists():
         try:
-            candidate = (react_dist / tail).resolve()
+            candidate = (REACT_DIST / tail).resolve()
             if (
-                str(candidate).startswith(str(react_dist.resolve()))
+                str(candidate).startswith(str(REACT_DIST.resolve()))
                 and candidate.exists()
                 and candidate.is_file()
             ):
@@ -4229,7 +4424,7 @@ async def super_admin_dashboard_page(request):
             pass
 
     # Fallback to SPA entry for React Router paths.
-    index_file = react_dist / "index.html"
+    index_file = REACT_DIST / "index.html"
     if index_file.exists():
         return web.FileResponse(index_file)
 
@@ -4237,11 +4432,63 @@ async def super_admin_dashboard_page(request):
     return web.Response(
         status=503,
         text=(
-            "Super Admin React build not found. "
+            "React build not found. "
             "Run 'npm install && npm run build' in frontend/superadmin-react, "
-            "then reload /super-admin/dashboard."
+            "then reload."
         ),
     )
+
+
+async def index(request):
+    """Root '/' — serve the React Landing page (signup/login)."""
+    return await _serve_react_spa(request)
+
+
+# Keep as alias for backward compatibility with existing route registrations.
+super_admin_dashboard_page = _serve_react_spa
+
+
+# --------------------------------------------------
+# MEMBER MANAGEMENT API (Admin only)
+# --------------------------------------------------
+async def list_members(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin"])
+
+    client_id = user.get("client_id")
+    if client_id is None:
+        return web.json_response({"error": "client_id missing"}, status=400)
+
+    users = await db_list_users_by_client(client_id)
+    # Filter to only return members
+    members = [u for u in users if u["role"] == "member"]
+    return web.json_response({"members": members})
+
+
+async def update_member_permissions(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin"])
+
+    uid = int(request.match_info.get("id"))
+    try:
+        data = await request.json()
+    except:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+
+    permissions = data.get("permissions")
+    if not isinstance(permissions, list):
+        return web.json_response({"error": "permissions must be a list"}, status=400)
+
+    # Ensure the user being updated belongs to the same client
+    target_user = await db_get_user_by_id(uid)
+    if not target_user or target_user["client_id"] != user.get("client_id"):
+        return web.json_response({"error": "access denied"}, status=403)
+
+    if target_user["role"] != "member":
+        return web.json_response({"error": "only members can be managed"}, status=400)
+
+    await db_update_user_permissions(uid, permissions)
+    return web.json_response({"status": "ok", "permissions": permissions})
 
 
 # SAVE WEB ROI
@@ -4422,14 +4669,15 @@ async def face_enroll_frames(request):
     import base64
 
     user = request.get("user") or {}
-    require_role(user, ["admin"])
+    require_role(user, ["admin", "member"])
     if AUTH_READY and can and not can(user, "faces", "enroll"):
         return web.Response(status=403)
 
     try:
         body = await request.json()
-    except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+    except Exception as e:
+        logger.error(f"[ENROLL-FRAMES] JSON decode error: {e}")
+        return web.json_response({"error": "invalid JSON", "details": str(e)}, status=400)
 
     raw_name = (body.get("name") or "").strip()
     if not raw_name:
@@ -4713,6 +4961,7 @@ async def get_me(request):
             "user_id": user.get("user_id"),
             "role": user.get("role"),
             "client_id": user.get("client_id"),
+            "permissions": user.get("permissions") or [],
         }
     )
 
@@ -4760,7 +5009,7 @@ async def list_clients(request):
 # WEBSOCKET HANDLER
 async def websocket_handler(request):
     user = request.get("user") or {}
-    require_role(user, ["admin"])
+    require_role(user, ["admin", "member"])
     if AUTH_READY and can and not can(request.get("user") or {}, "alerts", "view"):
         return web.Response(status=403)
     ws = web.WebSocketResponse()
@@ -5071,7 +5320,8 @@ async def websocket_handler(request):
 # --------------------------------------------------
 async def handle_offer(request):
     user = request.get("user") or {}
-    require_role(user, ["admin"])
+    # Members are allowed to connect to WebRTC stream (see ROLE_PERMISSIONS.webrtc.connect)
+    require_role(user, ["admin", "member"])
     if AUTH_READY and can and not can(request.get("user") or {}, "webrtc", "connect"):
         return web.Response(status=403)
     params = await request.json()
@@ -5321,8 +5571,15 @@ async def handle_offer(request):
         except Exception as e:
             logger.debug(f"force_h264 skipped: {e}")
 
-        # Create answer
+        # Create answer and inject HD bitrate hints into the video section so
+        # aiortc's encoder targets the full WEBRTC_VIDEO_KBPS bitrate.
         answer = await pc.createAnswer()
+        try:
+            munged_sdp = _munge_sdp_bitrate(answer.sdp, WEBRTC_VIDEO_KBPS)
+            answer = RTCSessionDescription(sdp=munged_sdp, type=answer.type)
+            logger.info(f"📡 SDP bitrate set to {WEBRTC_VIDEO_KBPS} kbps for HD output")
+        except Exception as _munge_err:
+            logger.warning(f"SDP bitrate munge skipped: {_munge_err}")
         await pc.setLocalDescription(answer)
         print(f"✅ Answer ready, type: {pc.localDescription.type}")
         print(f"✅ WebRTC connection established with {user_agent[:30]}")
@@ -5361,7 +5618,8 @@ def main():
     args, _unknown = parser.parse_known_args()
 
     middlewares = [auth_middleware] if auth_middleware else []
-    app = web.Application(middlewares=middlewares)
+    # Increase max request size to 100MB for base64 image uploads
+    app = web.Application(middlewares=middlewares, client_max_size=1024**2 * 100)
 
     # --------------------------------------------------
     # STATIC FILES (Swagger, CSS, JS, etc.)
@@ -5421,12 +5679,14 @@ def main():
                                     frames = perf_counters.get("frames", 0)
                                     resize_ms = perf_counters.get("resize_ms", 0.0)
                                     yolo_ms = perf_counters.get("yolo_ms", 0.0)
+                                    track_ms = perf_counters.get("track_ms", 0.0)
                                     faceid_ms = perf_counters.get("faceid_ms", 0.0)
                                     draw_ms = perf_counters.get("draw_ms", 0.0)
                                     total_ms = perf_counters.get("total_ms", 0.0)
                                     perf_counters["frames"] = 0
                                     perf_counters["resize_ms"] = 0.0
                                     perf_counters["yolo_ms"] = 0.0
+                                    perf_counters["track_ms"] = 0.0
                                     perf_counters["faceid_ms"] = 0.0
                                     perf_counters["draw_ms"] = 0.0
                                     perf_counters["total_ms"] = 0.0
@@ -5435,13 +5695,18 @@ def main():
                                         f", avg_ms: total={total_ms / frames:.1f} "
                                         f"resize={resize_ms / frames:.1f} "
                                         f"yolo={yolo_ms / frames:.1f} "
+                                        f"track={track_ms / frames:.1f} "
                                         f"faceid={faceid_ms / frames:.1f} "
                                         f"draw={draw_ms / frames:.1f}"
                                     )
                             except Exception:
                                 perf_summary = ""
+                        
+                        hw = _get_hardware_stats()
+                        hw_summary = f" | HW: cpu={hw['cpu_percent']}% ram={hw['ram_percent']}% gpu={hw['gpu_util']} gmem={hw['gpu_mem']}"
+
                         logger.info(
-                            f"📈 Stats (last {int(INTERVAL)}s): detections/s={detections_per_sec:.2f}, outgoing_fps={outgoing_fps:.2f}{perf_summary}"
+                            f"📈 Stats (last {int(INTERVAL)}s): detections/s={detections_per_sec:.2f}, outgoing_fps={outgoing_fps:.2f}{perf_summary}{hw_summary}"
                         )
                     except Exception as e:
                         logger.warning(f"Stats reporter error: {e}")
@@ -5483,11 +5748,17 @@ def main():
     app.on_cleanup.append(cleanup)
 
     app.router.add_get("/", index)
-    app.router.add_get("/super-admin/dashboard", super_admin_dashboard_page)
-    app.router.add_get("/super-admin/dashboard/{tail:.*}", super_admin_dashboard_page)
+    # React SPA catch-all routes — every user-facing path serves the React app
+    app.router.add_get("/home", _serve_react_spa)
+    app.router.add_get("/auth", _serve_react_spa)
+    app.router.add_get("/super-admin/dashboard", _serve_react_spa)
+    app.router.add_get("/super-admin/dashboard/{tail:.*}", _serve_react_spa)
     # Admin dashboard SPA (same React app, just different base path)
-    app.router.add_get("/admin/dashboard", super_admin_dashboard_page)
-    app.router.add_get("/admin/dashboard/{tail:.*}", super_admin_dashboard_page)
+    app.router.add_get("/admin/dashboard", _serve_react_spa)
+    app.router.add_get("/admin/dashboard/{tail:.*}", _serve_react_spa)
+    # Serve Vite-built static assets (JS, CSS, images) from the React dist folder
+    if REACT_DIST.exists() and (REACT_DIST / "assets").exists():
+        app.router.add_static("/assets/", path=REACT_DIST / "assets", show_index=False)
     app.router.add_post("/login", login_handler)
     app.router.add_post("/signup", signup_handler)
     app.router.add_get("/me", get_me)
@@ -5507,6 +5778,13 @@ def main():
     app.router.add_get("/api/face/list", face_list)
     app.router.add_post("/api/face/delete", face_delete)
     app.router.add_get("/api/face/recognition-logs", recognition_logs_handler)
+    # Member Management API (Admin only)
+    app.router.add_get("/api/admin/members", list_members)
+    app.router.add_patch("/api/admin/members/{id}/permissions", update_member_permissions)
+
+    # Runtime toggle: when disabled, alerts still work but no video clips are captured.
+    app.router.add_get("/api/event-clips/settings", event_clips_get_settings)
+    app.router.add_post("/api/event-clips/settings", event_clips_set_settings)
     app.router.add_get("/ws", websocket_handler)
     app.router.add_get("/api/super-admin/clients", list_clients)
     app.router.add_post("/enroll/create", create_enroll_link)
