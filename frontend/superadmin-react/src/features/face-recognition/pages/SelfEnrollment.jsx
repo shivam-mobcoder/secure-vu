@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { ShieldCheck, CheckCircle2, XCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, XCircle, Loader2, AlertTriangle, Shield } from 'lucide-react';
 import CapturePanel from '../components/CapturePanel';
 import { validateEnrollToken, enrollWithToken } from '../services/faceServices';
 
@@ -118,7 +118,7 @@ export default function SelfEnrollment() {
         <div style={s.page}>
             {/* Header */}
             <div style={s.header}>
-                <ShieldCheck size={24} color="#22c55e" />
+                <ShieldCheck size={28} color="#22c55e" />
                 <div>
                     <h1 style={s.title}>Face Enrollment</h1>
                     <p style={s.subtitle}>
@@ -127,67 +127,76 @@ export default function SelfEnrollment() {
                 </div>
             </div>
 
-            {/* Camera */}
-            <div style={s.section}>
-                <p style={s.stepLabel}>Step 1 — Face Scan</p>
-                <CapturePanel onCapture={handleCapture} onReset={handleReset} />
+            {/* Layout Grid */}
+            <div style={s.layoutGrid}>
+                {/* Camera */}
+                <div style={s.card}>
+                    <div style={s.cardHeader}>
+                        <h2 style={s.cardTitle}>Live Capture</h2>
+                        <p style={s.cardSubtitle}>Position face within the frame and ensure good lighting.</p>
+                    </div>
+                    <div style={s.cardContent}>
+                        <CapturePanel onCapture={handleCapture} onReset={handleReset} />
+                    </div>
+                </div>
+
+                {/* Form */}
+                <div style={s.card}>
+                    <div style={s.cardHeader}>
+                        <h2 style={s.cardTitle}>Your Details</h2>
+                        <p style={s.cardSubtitle}>Associate biometric data with your identity.</p>
+                    </div>
+                    <div style={s.cardContent}>
+                        <form onSubmit={handleSubmit} style={s.form}>
+                            <div style={s.field}>
+                                <label style={s.label}>Full Name</label>
+                                <input
+                                    type="text"
+                                    value={name}
+                                    onChange={e => setName(e.target.value)}
+                                    placeholder="e.g. Jane Doe"
+                                    required
+                                    style={s.input}
+                                />
+                            </div>
+
+                            {/* Error */}
+                            {status === 'error' && (
+                                <div style={s.errorMsg}>
+                                    <XCircle size={16} style={{ marginRight: 6, flexShrink: 0 }} />
+                                    {message}
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={!hasFrames || !name.trim() || status === 'loading'}
+                                style={{
+                                    ...s.submitBtn,
+                                    opacity: (!hasFrames || !name.trim() || status === 'loading') ? 0.6 : 1,
+                                    cursor: (!hasFrames || !name.trim() || status === 'loading') ? 'not-allowed' : 'pointer',
+                                }}
+                            >
+                                {status === 'loading' ? (
+                                    <>
+                                        <Loader2 size={15} style={{ animation: 'spin 1s linear infinite', marginRight: 8 }} />
+                                        Processing…
+                                    </>
+                                ) : (
+                                    'Register Identity'
+                                )}
+                            </button>
+                        </form>
+                    </div>
+                </div>
             </div>
 
-            {/* Form */}
-            <div style={s.section}>
-                <p style={s.stepLabel}>Step 2 — Your Details</p>
-                <form onSubmit={handleSubmit} style={s.form}>
-                    <div style={s.field}>
-                        <label style={s.label}>Full Name *</label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={e => setName(e.target.value)}
-                            placeholder="e.g. Ritik Sharma"
-                            required
-                            style={s.input}
-                        />
-                    </div>
-
-                    {/* Frame badge */}
-                    <div style={{
-                        ...s.badge,
-                        borderColor: hasFrames ? '#22c55e44' : '#ef444444',
-                        color: hasFrames ? '#86efac' : '#fca5a5',
-                        background: hasFrames ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
-                    }}>
-                        {hasFrames
-                            ? `✓ ${capturedFrames.length} poses captured`
-                            : '⚠ No frames captured yet — use the camera above'}
-                    </div>
-
-                    {/* Error */}
-                    {status === 'error' && (
-                        <div style={s.errorMsg}>
-                            <XCircle size={16} style={{ marginRight: 6, flexShrink: 0 }} />
-                            {message}
-                        </div>
-                    )}
-
-                    <button
-                        type="submit"
-                        disabled={!hasFrames || !name.trim() || status === 'loading'}
-                        style={{
-                            ...s.submitBtn,
-                            opacity: (!hasFrames || !name.trim() || status === 'loading') ? 0.5 : 1,
-                            cursor: (!hasFrames || !name.trim() || status === 'loading') ? 'not-allowed' : 'pointer',
-                        }}
-                    >
-                        {status === 'loading' ? (
-                            <>
-                                <Loader2 size={15} style={{ animation: 'spin 1s linear infinite', marginRight: 6 }} />
-                                Enrolling…
-                            </>
-                        ) : (
-                            'Register Face'
-                        )}
-                    </button>
-                </form>
+            {/* Privacy Banner */}
+            <div style={s.privacyBanner}>
+                <Shield size={18} color="#64748b" />
+                <p style={s.privacyText}>
+                    Biometric templates are irreversibly hashed and encrypted. Raw imagery is not stored.
+                </p>
             </div>
 
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -199,111 +208,116 @@ export default function SelfEnrollment() {
 const s = {
     page: {
         minHeight: '100vh',
-        background: '#0a0f1e',
-        padding: '24px',
+        background: '#f8fafc',
+        padding: '32px 24px',
         fontFamily: "'Inter', system-ui, sans-serif",
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 20,
+        gap: 32,
     },
     header: {
         display: 'flex',
         alignItems: 'center',
-        gap: 12,
+        gap: 16,
         width: '100%',
-        maxWidth: 560,
+        maxWidth: 1000,
+        borderBottom: '1px solid #e2e8f0',
+        paddingBottom: '24px',
     },
     title: {
         margin: 0,
-        fontSize: 22,
-        fontWeight: 800,
-        color: '#f1f5f9',
+        fontSize: 24,
+        fontWeight: 700,
+        color: '#0f172a',
         letterSpacing: '-0.02em',
     },
     subtitle: {
         margin: '4px 0 0',
-        fontSize: 13,
+        fontSize: 14,
         color: '#64748b',
-        lineHeight: 1.5,
     },
-    section: {
+    layoutGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+        gap: 32,
         width: '100%',
-        maxWidth: 560,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
+        maxWidth: 1000,
+        alignItems: 'start',
     },
-    stepLabel: {
+    card: {
+        background: '#ffffff',
+        borderRadius: 12,
+        border: '1px solid #e2e8f0',
+        boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
+        overflow: 'hidden',
+    },
+    cardHeader: {
+        padding: '24px',
+        borderBottom: '1px solid #f1f5f9',
+    },
+    cardTitle: {
         margin: 0,
-        fontSize: 11,
+        fontSize: 16,
         fontWeight: 700,
-        textTransform: 'uppercase',
-        letterSpacing: '0.08em',
-        color: '#475569',
+        color: '#1e293b',
+    },
+    cardSubtitle: {
+        margin: '4px 0 0',
+        fontSize: 13,
+        color: '#94a3b8',
+    },
+    cardContent: {
+        padding: '24px',
     },
     form: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 14,
-        background: '#0f172a',
-        borderRadius: 16,
-        padding: 20,
-        boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
+        gap: 20,
     },
     field: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 5,
+        gap: 8,
     },
     label: {
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: 600,
-        color: '#94a3b8',
-        textTransform: 'uppercase',
-        letterSpacing: '0.04em',
+        color: '#1e293b',
     },
     input: {
-        padding: '9px 12px',
+        padding: '12px 16px',
         borderRadius: 8,
-        border: '1px solid #1e293b',
-        background: '#1e293b',
-        color: '#e2e8f0',
+        border: '1px solid #e2e8f0',
+        background: '#f8fafc',
+        color: '#1e293b',
         fontSize: 14,
         outline: 'none',
         width: '100%',
         boxSizing: 'border-box',
     },
-    badge: {
-        fontSize: 12,
-        fontWeight: 500,
-        padding: '7px 12px',
-        borderRadius: 8,
-        border: '1px solid',
-        textAlign: 'center',
-    },
     errorMsg: {
         display: 'flex',
         alignItems: 'center',
-        background: 'rgba(239,68,68,0.08)',
-        border: '1px solid rgba(239,68,68,0.3)',
-        color: '#fca5a5',
+        background: '#fef2f2',
+        border: '1px solid #fecaca',
+        color: '#991b1b',
         borderRadius: 8,
-        padding: '10px 12px',
+        padding: '12px',
         fontSize: 13,
     },
     submitBtn: {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '12px 20px',
-        borderRadius: 10,
+        padding: '14px 24px',
+        borderRadius: 8,
         border: 'none',
-        background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
-        color: '#fff',
+        background: '#000000',
+        color: '#ffffff',
         fontSize: 14,
         fontWeight: 700,
-        transition: 'opacity 0.2s',
+        transition: 'all 0.2s',
     },
     centerCard: {
         display: 'flex',
@@ -311,16 +325,17 @@ const s = {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 16,
-        background: '#0f172a',
-        borderRadius: 20,
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 16,
         padding: '48px 40px',
-        boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
+        boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
         maxWidth: 420,
         margin: 'auto',
         textAlign: 'center',
     },
     loadingText: {
-        color: '#94a3b8',
+        color: '#64748b',
         fontSize: 15,
         margin: 0,
     },
@@ -332,9 +347,22 @@ const s = {
     },
     expiredText: {
         margin: 0,
-        color: '#94a3b8',
+        color: '#64748b',
         fontSize: 14,
         lineHeight: 1.6,
         maxWidth: 320,
+    },
+    privacyBanner: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        color: '#64748b',
+        fontSize: 12,
+        maxWidth: 1000,
+        width: '100%',
+        justifyContent: 'center',
+    },
+    privacyText: {
+        margin: 0,
     },
 };
