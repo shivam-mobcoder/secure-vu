@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, RefreshCw, Video, RadioTower } from 'lucide-react';
+import { ExternalLink, RefreshCw, Video, RadioTower, Filter, Clock, Shield } from 'lucide-react';
 import { getStoredToken } from '../../../auth';
+import '../../../styles/adminfeed.css';
 
 /**
  * AdminFeed
@@ -8,6 +9,38 @@ import { getStoredToken } from '../../../auth';
  * passing the current JWT token so the feed is authenticated.
  * This reuses 100% of the existing WebRTC/streaming logic.
  */
+
+// Mock alerts data for the Security Alerts sidebar
+const MOCK_ALERTS = [
+    {
+        id: 1,
+        status: 'new',
+        title: 'Watchlist Match Detected',
+        confidence: 98,
+        time: 'Just now',
+        location: 'North Entrance',
+        locationId: 'WL-001',
+    },
+    {
+        id: 2,
+        status: 'new',
+        title: 'Watchlist Match Detected',
+        confidence: 85,
+        time: '2 mins ago',
+        location: 'Parking Garage B',
+        locationId: 'WL-002',
+    },
+    {
+        id: 3,
+        status: 'acknowledged',
+        title: 'Watchlist Match Detected',
+        confidence: 92,
+        time: '8 mins ago',
+        location: 'Lobby Main',
+        locationId: 'WL-003',
+    },
+];
+
 export default function AdminFeed() {
     const iframeRef = useRef(null);
     const [loading, setLoading] = useState(true);
@@ -31,173 +64,116 @@ export default function AdminFeed() {
     }
 
     return (
-        <div style={s.page}>
-            {/* Header bar */}
-            <div style={s.header}>
-                <div style={s.titleGroup}>
-                    <RadioTower size={20} color="#22c55e" />
+        <div className="af-page">
+            {/* ── Left: Feed Area ──────────────────────────── */}
+            <div className="af-feed-area">
+                {/* Main Feed */}
+                <div className="af-main-feed">
+                    {/* Overlay: Status Badges */}
+                    <div className="af-feed-overlay">
+                        <span className="af-live-badge">
+                            <Shield size={14} />
+                            Live Monitoring Active
+                        </span>
+                        <span className="af-quality-badge">
+                            <span className="af-quality-dot" />
+                            Quality: Good
+                        </span>
+                    </div>
+
+                    {/* Grid lines overlay */}
+                    <div className="af-grid-overlay">
+                        <div className="af-grid-line-v" style={{ left: '25%' }} />
+                        <div className="af-grid-line-v" style={{ left: '50%' }} />
+                        <div className="af-grid-line-v" style={{ left: '75%' }} />
+                        <div className="af-grid-line-h" style={{ top: '33%' }} />
+                        <div className="af-grid-line-h" style={{ top: '66%' }} />
+                    </div>
+
+                    {/* Loading State */}
+                    {loading && (
+                        <div className="af-loading-overlay">
+                            <Video size={36} color="#22c55e" style={{ animation: 'af-pulse 1.5s ease-in-out infinite' }} />
+                            <p className="af-loading-text">Connecting to camera feed…</p>
+                        </div>
+                    )}
+
+                    {/* The actual iframe — logic fully preserved */}
+                    <iframe
+                        key={key}
+                        ref={iframeRef}
+                        src={feedUrl}
+                        style={{ opacity: loading ? 0 : 1 }}
+                        title="Live Camera Feed"
+                        allow="camera; microphone; autoplay"
+                        onLoad={() => setLoading(false)}
+                        onError={() => setLoading(false)}
+                    />
+                </div>
+
+                {/* Secondary Camera Slots */}
+                <div className="af-secondary-feeds">
+                    <div className="af-cam-slot">[ CAM 02 FEED ]</div>
+                    <div className="af-cam-slot">[ CAM 03 FEED ]</div>
+                </div>
+            </div>
+
+            {/* ── Right: Security Alerts Sidebar ─────────── */}
+            <div className="af-alerts-sidebar">
+                <div className="af-alerts-header">
                     <div>
-                        <h1 style={s.title}>Live Camera Feed</h1>
-                        <p style={s.subtitle}>Real-time CCTV stream with AI analytics</p>
+                        <h2 className="af-alerts-title">Security Alerts</h2>
+                        <p className="af-alerts-subtitle">Real-time watchlist notifications</p>
+                    </div>
+                    <div className="af-alerts-actions">
+                        <button className="af-alerts-icon-btn" title="Filter alerts">
+                            <Filter size={15} />
+                        </button>
+                        <button className="af-alerts-icon-btn" title="Refresh feed" onClick={handleReload}>
+                            <RefreshCw size={15} />
+                        </button>
                     </div>
                 </div>
 
-                <div style={s.headerActions}>
-                    {/* Live indicator */}
-                    <span style={s.liveBadge}>
-                        <span style={s.liveDot} />
-                        LIVE
-                    </span>
+                <div className="af-alerts-list">
+                    {MOCK_ALERTS.map(alert => (
+                        <div key={alert.id} className="af-alert-card">
+                            {/* Header: Badge + Confidence */}
+                            <div className="af-alert-top">
+                                <span className={`af-alert-badge ${alert.status === 'new' ? 'af-alert-badge--new' : 'af-alert-badge--ack'}`}>
+                                    {alert.status === 'new' ? 'NEW ALERT' : 'ACKNOWLEDGED'}
+                                </span>
+                                <div className="af-alert-confidence">
+                                    <div className="af-alert-confidence-value">{alert.confidence}%</div>
+                                    <div className="af-alert-confidence-label">Confidence</div>
+                                </div>
+                            </div>
 
-                    <button onClick={handleReload} style={s.iconBtn} title="Reload feed">
-                        <RefreshCw size={15} />
-                    </button>
-                    <button onClick={handleOpenInTab} style={s.iconBtn} title="Open in new tab">
-                        <ExternalLink size={15} />
-                    </button>
+                            {/* Title + Time */}
+                            <div className="af-alert-title">{alert.title}</div>
+                            <div className="af-alert-time">
+                                <Clock size={12} />
+                                {alert.time}
+                            </div>
+
+                            {/* Location */}
+                            <div className="af-alert-location">
+                                <div className="af-alert-location-img">IMG</div>
+                                <div>
+                                    <div className="af-alert-location-name">{alert.location}</div>
+                                    <div className="af-alert-location-id">ID: {alert.locationId}</div>
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="af-alert-actions">
+                                <button className="af-alert-btn af-alert-btn--primary">Acknowledge</button>
+                                <button className="af-alert-btn af-alert-btn--secondary">Review</button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
-
-            {/* Iframe container */}
-            <div style={s.iframeWrapper}>
-                {loading && (
-                    <div style={s.loadingOverlay}>
-                        <Video size={36} color="#22c55e" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
-                        <p style={s.loadingText}>Connecting to camera feed…</p>
-                    </div>
-                )}
-                <iframe
-                    key={key}
-                    ref={iframeRef}
-                    src={feedUrl}
-                    style={{
-                        ...s.iframe,
-                        opacity: loading ? 0 : 1,
-                    }}
-                    title="Live Camera Feed"
-                    allow="camera; microphone; autoplay"
-                    onLoad={() => setLoading(false)}
-                    onError={() => setLoading(false)}
-                />
-            </div>
-
-            <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.4; }
-        }
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.2; }
-        }
-      `}</style>
         </div>
     );
 }
-
-const s = {
-    page: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        height: 'calc(100vh - 48px)',  // fill the main content area
-        background: '#0a0f1e',
-        padding: 0,
-        margin: -32,       // cancel the layout's p-8 padding so feed goes edge-to-edge
-        fontFamily: "'Inter', system-ui, sans-serif",
-    },
-    header: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '16px 24px',
-        background: '#0f172a',
-        borderBottom: '1px solid #1e293b',
-        flexShrink: 0,
-    },
-    titleGroup: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-    },
-    title: {
-        margin: 0,
-        fontSize: 18,
-        fontWeight: 800,
-        color: '#f1f5f9',
-        letterSpacing: '-0.02em',
-    },
-    subtitle: {
-        margin: 0,
-        fontSize: 12,
-        color: '#64748b',
-    },
-    headerActions: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-    },
-    liveBadge: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        background: 'rgba(34,197,94,0.12)',
-        border: '1px solid rgba(34,197,94,0.35)',
-        color: '#86efac',
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: '0.08em',
-        padding: '4px 10px',
-        borderRadius: 99,
-    },
-    liveDot: {
-        width: 7,
-        height: 7,
-        borderRadius: '50%',
-        background: '#22c55e',
-        animation: 'blink 1.2s ease-in-out infinite',
-        display: 'inline-block',
-    },
-    iconBtn: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 34,
-        height: 34,
-        borderRadius: 8,
-        border: '1px solid #1e293b',
-        background: 'rgba(255,255,255,0.04)',
-        color: '#94a3b8',
-        cursor: 'pointer',
-        transition: 'background 0.15s',
-    },
-    iframeWrapper: {
-        flex: 1,
-        position: 'relative',
-        background: '#000',
-        overflow: 'hidden',
-    },
-    loadingOverlay: {
-        position: 'absolute',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#000',
-        gap: 14,
-        zIndex: 2,
-    },
-    loadingText: {
-        margin: 0,
-        color: '#64748b',
-        fontSize: 14,
-    },
-    iframe: {
-        width: '100%',
-        height: '100%',
-        border: 'none',
-        display: 'block',
-        transition: 'opacity 0.4s',
-    },
-};
