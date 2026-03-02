@@ -14,6 +14,7 @@ import Settings from "./pages/Settings";
 import ClientDetailView from "./pages/ClientDetailView";
 import AddClient from "./pages/AddClient";
 import UserManagement from "./pages/UserManagement";
+import SystemSettings from "./pages/SystemSettings";
 import AdminLayout from "./components/AdminLayout";
 import AdminDashboardLayout from "./components/AdminDashboardLayout";
 import RequireRole from "./components/RequireRole";
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="face/logs" element={<RecognitionLogs />} />
           <Route path="live-feed" element={<AdminFeed />} />
           <Route path="users" element={<UserManagement />} />
+          <Route path="system-settings" element={<SystemSettings />} />
         </Route>
       </Route>
 
