@@ -1,0 +1,423 @@
+/* ═══════════════════════════════════════════════════
+   AdminFeed – Live Feed UI
+   ═══════════════════════════════════════════════════ */
+
+.af-page {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 0;
+    height: calc(100vh - 64px);
+    margin: -24px;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: #f8fafc;
+    overflow: hidden;
+}
+
+/* ── Left: Feed Area ─────────────────────────────── */
+.af-feed-area {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+    overflow: hidden;
+}
+
+/* ── Main Feed Container ─────────────────────────── */
+.af-main-feed {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #0a0f1e;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+}
+
+.af-main-feed iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+    transition: opacity 0.4s ease;
+}
+
+/* Feed Overlays */
+.af-feed-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.af-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(8px);
+    color: #f1f5f9;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 6px 14px;
+    border-radius: 8px;
+    text-transform: uppercase;
+}
+
+.af-live-badge svg {
+    color: #22c55e;
+}
+
+.af-quality-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 8px;
+}
+
+.af-quality-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    display: inline-block;
+}
+
+/* Grid lines overlay */
+.af-grid-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.af-grid-line-v,
+.af-grid-line-h {
+    position: absolute;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.af-grid-line-v {
+    width: 1px;
+    top: 0;
+    bottom: 0;
+}
+
+.af-grid-line-h {
+    height: 1px;
+    left: 0;
+    right: 0;
+}
+
+/* Loading overlay */
+.af-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #0a0f1e;
+    gap: 14px;
+    z-index: 10;
+}
+
+.af-loading-text {
+    margin: 0;
+    color: #64748b;
+    font-size: 14px;
+}
+
+/* ── Secondary Camera Slots ──────────────────────── */
+.af-secondary-feeds {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.af-cam-slot {
+    background: #1e293b;
+    border-radius: 12px;
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    letter-spacing: 0.05em;
+    border: 1px solid #334155;
+    transition: border-color 0.2s;
+}
+
+.af-cam-slot:hover {
+    border-color: #475569;
+}
+
+/* ── Right: Security Alerts Sidebar ──────────────── */
+.af-alerts-sidebar {
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    border-left: 1px solid #e2e8f0;
+    overflow: hidden;
+}
+
+.af-alerts-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 20px 12px;
+    flex-shrink: 0;
+}
+
+.af-alerts-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+}
+
+.af-alerts-subtitle {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.af-alerts-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.af-alerts-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.af-alerts-icon-btn:hover {
+    background: #f1f5f9;
+    color: #334155;
+}
+
+/* ── Alert List ──────────────────────────────────── */
+.af-alerts-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.af-alert-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 16px;
+    transition: box-shadow 0.2s;
+}
+
+.af-alert-card:hover {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* Alert Header */
+.af-alert-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.af-alert-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+
+.af-alert-badge--new {
+    background: #065f46;
+    color: #d1fae5;
+}
+
+.af-alert-badge--ack {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.af-alert-confidence {
+    text-align: right;
+}
+
+.af-alert-confidence-value {
+    font-size: 22px;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1;
+}
+
+.af-alert-confidence-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #94a3b8;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* Alert Title + Meta */
+.af-alert-title {
+    margin: 6px 0 2px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.af-alert-time {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 12px;
+}
+
+/* Alert Location */
+.af-alert-location {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.af-alert-location-img {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    background: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 800;
+    flex-shrink: 0;
+}
+
+.af-alert-location-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.af-alert-location-id {
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+/* Alert Actions */
+.af-alert-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.af-alert-btn {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+    border: none;
+}
+
+.af-alert-btn--primary {
+    background: #0f172a;
+    color: #f8fafc;
+}
+
+.af-alert-btn--primary:hover {
+    background: #1e293b;
+}
+
+.af-alert-btn--secondary {
+    background: #f8fafc;
+    color: #334155;
+    border: 1px solid #e2e8f0;
+}
+
+.af-alert-btn--secondary:hover {
+    background: #f1f5f9;
+}
+
+/* ── Animations ──────────────────────────────────── */
+@keyframes af-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
+}
+
+@keyframes af-blink {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.2;
+    }
+}
+
+/* ── Responsive ──────────────────────────────────── */
+@media (max-width: 1024px) {
+    .af-page {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+    }
+
+    .af-alerts-sidebar {
+        border-left: none;
+        border-top: 1px solid #e2e8f0;
+        max-height: 300px;
+    }
+}
