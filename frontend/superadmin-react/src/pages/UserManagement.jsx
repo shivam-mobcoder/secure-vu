@@ -1,6 +1,18 @@
-import { useState, useEffect } from "react";
-import { UserCog, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+    UserPlus,
+    Search,
+    Filter,
+    Settings,
+    UserX,
+    ChevronLeft,
+    ChevronRight,
+    Loader2,
+    Bell
+} from "lucide-react";
 import { getStoredToken } from "../auth";
+import "../styles/usermanagement.css";
 
 const PERMISSION_OPTIONS = [
     { label: "Enrollment Only", value: ["face_enroll"] },
@@ -15,13 +27,11 @@ export default function UserManagement() {
     const [members, setMembers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [search, setSearch] = useState("");
     const [updatingId, setUpdatingId] = useState(null);
+    const navigate = useNavigate();
 
-    useEffect(() => {
-        fetchMembers();
-    }, []);
-
-    async function fetchMembers() {
+    const fetchMembers = useCallback(async () => {
         try {
             const res = await fetch("/api/admin/members", {
                 headers: {
@@ -37,7 +47,11 @@ export default function UserManagement() {
         } finally {
             setLoading(false);
         }
-    }
+    }, []);
+
+    useEffect(() => {
+        fetchMembers();
+    }, [fetchMembers]);
 
     async function handlePermissionChange(memberId, newPerms) {
         setUpdatingId(memberId);
@@ -52,7 +66,6 @@ export default function UserManagement() {
             });
             if (!res.ok) throw new Error("Update failed");
 
-            // Optimistic update
             setMembers(members.map(m =>
                 m.id === memberId ? { ...m, permissions: newPerms } : m
             ));
@@ -63,88 +76,175 @@ export default function UserManagement() {
         }
     }
 
-    if (loading) {
-        return (
-            <div className="flex h-64 items-center justify-center">
-                <Loader2 className="animate-spin text-slate-400" size={32} />
-            </div>
-        );
-    }
+    const filtered = members.filter(m =>
+        m.email.toLowerCase().includes(search.toLowerCase())
+    );
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-slate-900">User Management</h1>
-                <p className="text-slate-500">Manage access permissions for your members.</p>
+        <div className="um-page">
+            {/* Top Bar */}
+            <div className="um-top-bar">
+                <div className="um-global-search">
+                    <Search size={18} color="#94a3b8" />
+                    <input type="text" placeholder="Search clients, subscriptions..." className="um-global-search-input" />
+                </div>
+                <div className="um-top-actions">
+                    <button className="um-notification-btn">
+                        <Bell size={20} color="#64748b" />
+                    </button>
+                </div>
             </div>
 
-            {error && (
-                <div className="rounded-lg bg-red-50 p-4 text-sm text-red-600">
-                    {error}
+            {/* Header Area */}
+            <div className="um-header">
+                <div className="um-title-section">
+                    <h1 className="um-title">User Management</h1>
+                    <p className="um-subtitle">Manage identities, roles, and access permissions.</p>
                 </div>
-            )}
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="um-add-user-btn">
+                        <UserPlus size={16} />
+                        Add User
+                    </button>
+                    <button className="um-filter-btn" onClick={() => navigate("/admin/dashboard/system-settings")}>
+                        <Settings size={16} />
+                        Settings
+                    </button>
+                </div>
+            </div>
 
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                        <tr>
-                            <th className="px-6 py-4">User</th>
-                            <th className="px-6 py-4">Current Role</th>
-                            <th className="px-6 py-4">Permissions</th>
-                            <th className="px-6 py-4">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {members.map((member) => (
-                            <tr key={member.id} className="hover:bg-slate-50/50">
-                                <td className="px-6 py-4">
-                                    <div className="font-medium text-slate-900">{member.email}</div>
-                                    <div className="text-xs text-slate-500">Member since {new Date(member.created_at || Date.now()).toLocaleDateString()}</div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 capitalize">
-                                        {member.role}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-3">
-                                        <select
-                                            disabled={updatingId === member.id}
-                                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                                            value={JSON.stringify(member.permissions || [])}
-                                            onChange={(e) => handlePermissionChange(member.id, JSON.parse(e.target.value))}
-                                        >
-                                            {PERMISSION_OPTIONS.map((opt) => (
-                                                <option key={opt.label} value={JSON.stringify(opt.value)}>
-                                                    {opt.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {updatingId === member.id && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    {member.is_active ? (
-                                        <div className="flex items-center gap-1 text-emerald-600">
-                                            <ShieldCheck size={16} />
-                                            <span>Active</span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center gap-1 text-slate-400">
-                                            <ShieldAlert size={16} />
-                                            <span>Inactive</span>
-                                        </div>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {members.length === 0 && (
-                    <div className="py-12 text-center text-slate-500">
-                        No members found for your client.
+            {/* Content Table Section */}
+            <div className="um-card">
+                {/* Search & Filter Row */}
+                <div className="um-toolbar">
+                    <div className="um-search-container">
+                        <Search size={16} color="#94a3b8" />
+                        <input
+                            type="text"
+                            placeholder="Search users by name or email..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            className="um-toolbar-search"
+                        />
                     </div>
-                )}
+                    <button className="um-filter-btn">
+                        <Filter size={16} />
+                        Filter
+                    </button>
+                </div>
+
+                {/* Table */}
+                <div className="um-table-boundary">
+                    <table className="um-table">
+                        <thead>
+                            <tr>
+                                <th className="um-th" style={{ width: '25%' }}>User</th>
+                                <th className="um-th" style={{ width: '10%' }}>Role</th>
+                                <th className="um-th" style={{ width: '15%' }}>Organization</th>
+                                <th className="um-th" style={{ width: '15%' }}>Access</th>
+                                <th className="um-th" style={{ width: '10%' }}>Status</th>
+                                <th className="um-th" style={{ width: '15%' }}>Face Enrolled</th>
+                                <th className="um-th" style={{ width: '10%', textAlign: 'right' }}>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={7} className="um-empty-td">
+                                        <Loader2 size={24} className="animate-spin" style={{ color: '#6366f1', marginBottom: 12 }} />
+                                        <div style={{ color: '#64748b' }}>Fetching user directory...</div>
+                                    </td>
+                                </tr>
+                            ) : filtered.length === 0 ? (
+                                <tr>
+                                    <td colSpan={7} className="um-empty-td">
+                                        <div style={{ color: '#64748b' }}>{search ? 'No users matching your search' : 'No users found'}</div>
+                                    </td>
+                                </tr>
+                            ) : filtered.map((member) => (
+                                <tr key={member.id} className="um-tr">
+                                    <td className="um-td-user">
+                                        <div className="um-user-cell">
+                                            <div className="um-avatar">
+                                                {member.email.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div className="um-user-info">
+                                                <div className="um-user-name">{member.email.split('@')[0]}</div>
+                                                <div className="um-user-email">{member.email}</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="um-td-secondary">
+                                        <span className="um-badge" style={{
+                                            backgroundColor: member.role === 'admin' ? '#f1f5f9' : '#ffffff',
+                                            border: '1px solid #e2e8f0',
+                                            textTransform: 'capitalize'
+                                        }}>
+                                            {member.role || 'Member'}
+                                        </span>
+                                    </td>
+                                    <td className="um-td-secondary">
+                                        {member.organization || "Pescadero State"}
+                                    </td>
+                                    <td className="um-td-secondary">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <select
+                                                disabled={updatingId === member.id}
+                                                className="um-inline-select"
+                                                value={JSON.stringify(member.permissions || [])}
+                                                onChange={(e) => handlePermissionChange(member.id, JSON.parse(e.target.value))}
+                                            >
+                                                {PERMISSION_OPTIONS.map((opt) => (
+                                                    <option key={opt.label} value={JSON.stringify(opt.value)}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {updatingId === member.id && <Loader2 size={12} className="animate-spin" style={{ color: '#3b82f6' }} />}
+                                        </div>
+                                    </td>
+                                    <td className="um-td-secondary">
+                                        <div className="um-status-row">
+                                            <div className="um-status-dot" style={{ backgroundColor: member.is_active ? '#000000' : '#94a3b8' }} />
+                                            <span>{member.is_active ? 'Active' : 'Inactive'}</span>
+                                        </div>
+                                    </td>
+                                    <td className="um-td-secondary">
+                                        <span className="um-badge" style={{
+                                            backgroundColor: member.face_enrolled ? '#fef3c7' : '#f1f5f9',
+                                            color: '#000',
+                                            fontWeight: 600
+                                        }}>
+                                            {member.face_enrolled ? 'Enrolled' : 'Pending'}
+                                        </span>
+                                    </td>
+                                    <td className="um-td-actions">
+                                        <div className="um-action-group">
+                                            <button className="um-icon-btn"><Settings size={16} /></button>
+                                            <button className="um-icon-btn"><UserX size={16} /></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Pagination */}
+                <div className="um-pagination">
+                    <button className="um-nav-btn">
+                        <ChevronLeft size={18} /> Previous
+                    </button>
+                    <div className="um-page-markers">
+                        <button className="um-page-marker" style={{ backgroundColor: '#f8fafc', borderColor: '#e2e8f0', fontWeight: 700 }}>1</button>
+                        <button className="um-page-marker">2</button>
+                        <button className="um-page-marker">3</button>
+                        <span style={{ color: '#cbd5e1', padding: '0 4px' }}>...</span>
+                    </div>
+                    <button className="um-nav-btn">
+                        Next <ChevronRight size={18} />
+                    </button>
+                </div>
             </div>
         </div>
     );
