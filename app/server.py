@@ -86,7 +86,7 @@ except Exception as e:
     print(f"[AUTH] rbac import failed: {e}")
 
 try:
-    from db import db_get_camera, set_pool  # type: ignore
+    from db import db_get_camera, set_pool, db_list_users_by_client  # type: ignore
 except Exception as e:
     print(f"[AUTH] db helper import failed: {e}")
 
