@@ -1,11 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 
 const backendTarget = process.env.VITE_BACKEND_PROXY_TARGET || 'https://localhost:8000';
 
 export default defineConfig(({ command }) => ({
   base: '/',
-  plugins: [react()],
+  plugins: [react(), basicSsl()],
   define: {
     // During dev (`serve`) leave empty so fetch('/api/…') goes through Vite proxy.
     // During production build use the env var or hardcoded backend origin.
@@ -14,6 +15,7 @@ export default defineConfig(({ command }) => ({
     ),
   },
   server: {
+    https: true,
     proxy: {
       '/api': {
         target: backendTarget,
