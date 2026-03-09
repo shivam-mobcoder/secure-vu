@@ -4886,6 +4886,92 @@ async def face_delete(request):
     return web.json_response({"status": "deleted", "name": name})
 
 
+# FACE RECOGNIZE ENDPOINT (for Corporate Access page)
+async def face_recognize(request):
+    """
+    POST /api/face/recognize
+
+    Accepts a single base64-encoded JPEG frame captured by the browser webcam,
+    runs InsightFace face detection, and matches against enrolled face embeddings.
+
+    Body: {"frame": "data:image/jpeg;base64,..."}
+    Returns: {"status": "ok", "recognized": bool, "name": str, "confidence": float}
+    """
+    import base64
+
+    user = request.get("user") or {}
+    require_role(user, ["admin", "member"])
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+
+    b64_frame = body.get("frame", "")
+    if not b64_frame:
+        return web.json_response({"error": "frame required"}, status=400)
+
+    # Strip data URI prefix if present
+    if isinstance(b64_frame, str) and "," in b64_frame:
+        b64_frame = b64_frame.split(",", 1)[1]
+
+    try:
+        raw_bytes = base64.b64decode(b64_frame)
+        arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception as e:
+        return web.json_response({"error": f"frame decode failed: {e}"}, status=400)
+
+    if img is None:
+        return web.json_response({"error": "invalid image data"}, status=400)
+
+    # Detect faces using InsightFace
+    if not face_app:
+        return web.json_response(
+            {"error": "face detection model not loaded"}, status=503
+        )
+
+    try:
+        detected = face_app.get(img)
+    except Exception as e:
+        return web.json_response({"error": f"detection failed: {e}"}, status=500)
+
+    if not detected:
+        return web.json_response(
+            {"status": "ok", "recognized": False, "name": None, "confidence": 0.0}
+        )
+
+    # Pick the largest face
+    best_face = max(
+        detected,
+        key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
+    )
+    box = tuple(int(v) for v in best_face.bbox)
+
+    # Recognize using FaceIDManager
+    if not faceid:
+        return web.json_response(
+            {"error": "face recognition model not loaded"}, status=503
+        )
+
+    try:
+        results = faceid.recognize_batch(img, [box])
+        name, score, _ = results[0] if results else ("Unknown", 0.0, None)
+    except Exception as e:
+        logger.warning("[RECOGNIZE] Error: %s", e)
+        return web.json_response({"error": f"recognition failed: {e}"}, status=500)
+
+    recognized = name != "Unknown" and score >= faceid.threshold
+    return web.json_response(
+        {
+            "status": "ok",
+            "recognized": recognized,
+            "name": name if recognized else None,
+            "confidence": round(float(score), 3),
+        }
+    )
+
+
 # SUPER ADMIN: LIST CLIENTS METADATA
 async def list_clients(request):
     user = request.get("user") or {}
@@ -5783,6 +5869,7 @@ def main():
     app.router.add_get("/api/face/list", face_list)
     app.router.add_post("/api/face/delete", face_delete)
     app.router.add_get("/api/face/recognition-logs", recognition_logs_handler)
+    app.router.add_post("/api/face/recognize", face_recognize)
     # Member Management API (Admin only)
     app.router.add_get("/api/admin/members", list_members)
     app.router.add_patch("/api/admin/members/{id}/permissions", update_member_permissions)

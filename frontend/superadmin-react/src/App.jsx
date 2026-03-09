@@ -6,6 +6,7 @@ import RecognitionLogs from "./features/face-recognition/pages/RecognitionLogs";
 import FaceEnrollment from "./features/face-recognition/pages/FaceEnrollment";
 import AdminFeed from "./features/face-recognition/pages/AdminFeed";
 import SelfEnrollment from "./features/face-recognition/pages/SelfEnrollment";
+import CorporateAccess from "./features/face-recognition/pages/CorporateAccess";
 
 import SubscriptionManagement from "./pages/SubscriptionManagement";
 import ClientManagement from "./pages/ClientManagement";
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="live-feed" element={<AdminFeed />} />
           <Route path="users" element={<UserManagement />} />
           <Route path="system-settings" element={<SystemSettings />} />
+          <Route path="face/corporate-access" element={<CorporateAccess />} />
         </Route>
       </Route>
 

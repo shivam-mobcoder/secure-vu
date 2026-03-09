@@ -9,7 +9,8 @@ import {
     Settings,
     ChevronDown,
     ChevronUp,
-    Shield
+    Shield,
+    Building2
 } from "lucide-react";
 import { clearAuth, getStoredRole, getStoredPermissions } from "../auth";
 
@@ -89,6 +90,10 @@ export default function AdminDashboardLayout() {
                                         Live Feed
                                     </NavLink>
                                 )}
+                                <NavLink to="face/corporate-access" className={subNavClass}>
+                                    <Building2 size={18} />
+                                    Corporate Access
+                                </NavLink>
 
                                 {isAdmin && (
                                     <>
