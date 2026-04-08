@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+from pathlib import Path
+dotenv_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path)
 
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
@@ -44,7 +46,7 @@ from copy import deepcopy
 import asyncio
 import logging
 import numpy as np
-from pathlib import Path
+from ssl import SSLContext
 import ssl
 import argparse
 from queue import Queue
@@ -165,19 +167,19 @@ print(f"🔁 Running in {MODE.upper()} mode")
 RTSP_URLS = {
     1: os.getenv(
         "RTSP_URL_1",
-        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=1&subtype=1",
+        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=1&subtype=0",
     ).strip(),
     2: os.getenv(
         "RTSP_URL_2",
-        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=2&subtype=1",
+        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=2&subtype=0",
     ).strip(),
     3: os.getenv(
         "RTSP_URL_3",
-        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=3&subtype=1",
+        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=3&subtype=0",
     ).strip(),
     4: os.getenv(
         "RTSP_URL_4",
-        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=4&subtype=1",
+        "rtsp://test:qazwsx2580@192.168.2.25:554/cam/realmonitor?channel=4&subtype=0",
     ).strip(),
 }
 
@@ -356,10 +358,34 @@ def _cs(camera_id):
 
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1").strip() == "1"
 
+# --------------------------------------------------
+# MODEL_SELECT — Choose which detection models to load
+# --------------------------------------------------
+# 1 = General Object Detection (YOLO, uses YOLO_WEIGHTS)
+# 2 = Face Detection (yolov8n-face)
+# 3 = Fire & Smoke Detection
+# 4 = License Plate Detection (LPD)
+# 5 = ALL specialized models (YOLO + face det + fire + LPD)
+# 6 = PRODUCTION MODE — secure_cv_best.pt + InsightFace + all features (default)
+MODEL_SELECT = _int_env("MODEL_SELECT", 6)
+if MODEL_SELECT not in (1, 2, 3, 4, 5, 6, 7):
+    print(f"⚠️ Invalid MODEL_SELECT={MODEL_SELECT}, defaulting to 7 (full package)")
+    MODEL_SELECT = 7
+print(f"🔧 MODEL_SELECT={MODEL_SELECT}")
+
 # FaceID can be very expensive when ONNXRuntime is CPU-only.
 # Default to a slower cadence for better FPS; override via env.
 # Increased to 5 for better responsiveness as per user request (was 90)
 FACE_EVERY_N_FRAMES = _int_env("FACE_EVERY_N_FRAMES", 5)
+# Per-model cadence for specialized detectors (used when MODEL_SELECT=5 or 7)
+FIRE_EVERY_N_FRAMES = _int_env("FIRE_EVERY_N_FRAMES", 3)
+LPD_EVERY_N_FRAMES = _int_env("LPD_EVERY_N_FRAMES", 5)
+FACE_DET_EVERY_N_FRAMES = _int_env("FACE_DET_EVERY_N_FRAMES", 3)
+
+# Performance: Disable visual overlays to save CPU
+DISABLE_DRAWING = _int_env("DISABLE_DRAWING", 0) == 1
+if DISABLE_DRAWING:
+    print("🚀 PERFORMANCE MODE: Visual overlays and drawing DISABLED (Logs only)")
 
 # YOLO: default to smaller input for higher FPS; override via env.
 YOLO_PROCESS_EVERY_N_FRAMES = _int_env("YOLO_PROCESS_EVERY_N_FRAMES", 1)
@@ -1217,63 +1243,110 @@ device = torch.device("cuda:0" if use_cuda else "cpu")
 print(f"🔍 Using device: {device}")
 print("CUDA available:", torch.cuda.is_available())
 
-# Load YOLO
-# Prefer an explicit environment variable so we can switch models without editing code.
-# Default to the finetuned run's `last.pt` so the server uses your trained model.
+# --------------------------------------------------
+# MODEL LOADING — controlled by MODEL_SELECT
+# --------------------------------------------------
+# Globals for specialized models (None = not loaded)
+face_det_model = None   # YOLO face detector (yolov8n-face.pt)
+fire_model = None        # Fire/smoke detector (fire_smoke.pt)
+lpd_model = None         # License plate detector (model.pt)
+yolo_model = None        # General YOLO object detector
 
 
-# weights_path = os.environ.get("YOLO_WEIGHTS", "models/yolo/best.pt")
-
-weights_path = os.environ.get(
-    "YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
-)
-if not os.path.isabs(weights_path):
-    weights_path = str(REPO_ROOT / weights_path)
-print(f"🔁 Loading YOLO weights from: {weights_path}")
-# Load YOLO and let Ultralytics manage FP16 behavior
-# Load YOLO model and move to the selected device. Ultralytics will handle FP16 safely.
-yolo_model = YOLO(weights_path)
-yolo_model.to(device)
-
-if use_cuda:
-    if YOLO_ENABLE_FUSE:
+def _load_yolo_model(path, label="YOLO"):
+    """Load a YOLO model, apply GPU optimizations, and return it."""
+    if not os.path.isabs(path):
+        path = str(REPO_ROOT / path)
+    if not os.path.exists(path):
+        print(f"⚠️ {label} weights not found at {path}, skipping")
+        return None
+    print(f"🔁 Loading {label} weights from: {path}")
+    model = YOLO(path)
+    model.to(device)
+    if use_cuda and YOLO_ENABLE_FUSE:
         try:
-            yolo_model.fuse()
-            print("⚡ YOLO model fused for faster inference")
+            model.fuse()
+            print(f"⚡ {label} model fused")
         except Exception as e:
-            print(f"⚠️ YOLO fuse skipped: {e}")
-    else:
-        print("ℹ️ YOLO fuse disabled (YOLO_ENABLE_FUSE=0)")
-
-    if YOLO_ENABLE_FP16:
+            print(f"⚠️ {label} fuse skipped: {e}")
+    if use_cuda and YOLO_ENABLE_FP16:
         try:
-            yolo_model.model.half()
-            print("⚡ YOLO model set to FP16 precision (YOLO_ENABLE_FP16=1)")
+            model.model.half()
+            print(f"⚡ {label} set to FP16")
         except Exception as e:
-            print(f"⚠️ YOLO FP16 conversion skipped: {e}")
+            print(f"⚠️ {label} FP16 skipped: {e}")
+    print(f"✅ {label} loaded on {model.device}")
+    return model
+
+
+# --- Determine which YOLO weights to use for the general model ---
+_yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7)
+if _yolo_general_needed:
+    if MODEL_SELECT in (6, 7):
+        # Production/Full mode: always use the high-accuracy model
+        weights_path = str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
     else:
-        print("ℹ️ YOLO FP16 disabled (YOLO_ENABLE_FP16=0)")
+        weights_path = os.environ.get(
+            "YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
+        )
+    yolo_model = _load_yolo_model(weights_path, "YOLO-General")
+else:
+    print(f"ℹ️ General YOLO model not loaded (MODEL_SELECT={MODEL_SELECT})")
 
-print(f"✅ YOLO device: {yolo_model.device}")
-print("YOLO device:", next(yolo_model.model.parameters()).device)
+# --- Face Detection (yolov8n-face) ---
+if MODEL_SELECT in (2, 5, 7):
+    face_det_model = _load_yolo_model(
+        str(REPO_ROOT / "models" / "face" / "yolov8n-face.pt"), "YOLO-Face"
+    )
 
-# Test YOLO inference (do not cast test_input to half manually)
-try:
-    test_input = torch.zeros(1, 3, 640, 640, device=device)
-    amp_enabled = bool(use_cuda and YOLO_ENABLE_FP16)
-    with torch.inference_mode():
-        with torch.cuda.amp.autocast(enabled=amp_enabled):
-            _ = yolo_model(test_input, verbose=False)
-    print(f"✅ YOLO inference OK on {device}")
-except Exception as e:
-    print(f"⚠️ YOLO GPU test failed, continuing on CPU: {e}")
+# --- Fire & Smoke ---
+if MODEL_SELECT in (3, 5, 7):
+    fire_model = _load_yolo_model(
+        str(REPO_ROOT / "models" / "fire" / "fire_smoke.pt"), "Fire-Smoke"
+    )
+
+# --- License Plate Detection (LPD) ---
+if MODEL_SELECT in (4, 5, 7):
+    lpd_model = _load_yolo_model(
+        str(REPO_ROOT / "models" / "lpd" / "model.pt"), "LPD"
+    )
+
+# --- Production/Full mode (6, 7): InsightFace face recognition ---
+if MODEL_SELECT in (6, 7):
+    FACE_ENABLE = True
+    print(f"✅ Full/Production mode: InsightFace recognition enabled (MODEL_SELECT={MODEL_SELECT})")
+
+# Print summary of loaded models
+_loaded = []
+if yolo_model is not None:
+    _loaded.append("YOLO-General")
+if face_det_model is not None:
+    _loaded.append("YOLO-Face")
+if fire_model is not None:
+    _loaded.append("Fire-Smoke")
+if lpd_model is not None:
+    _loaded.append("LPD")
+print(f"📦 Loaded models: {', '.join(_loaded) if _loaded else 'NONE'}")
+
+# Test primary YOLO inference
+_primary_model = yolo_model or face_det_model or fire_model or lpd_model
+if _primary_model is not None:
     try:
-        yolo_model.to("cpu")
-    except Exception:
-        pass
-    device = torch.device("cpu")
+        test_input = torch.zeros(1, 3, 640, 640, device=device)
+        amp_enabled = bool(use_cuda and YOLO_ENABLE_FP16)
+        with torch.inference_mode():
+            with torch.cuda.amp.autocast(enabled=amp_enabled):
+                _ = _primary_model(test_input, verbose=False)
+        print(f"✅ Primary model inference OK on {device}")
+    except Exception as e:
+        print(f"⚠️ Primary model GPU test failed, continuing on CPU: {e}")
+        try:
+            _primary_model.to("cpu")
+        except Exception:
+            pass
+        device = torch.device("cpu")
 
-# If CUDA is available, enable a couple of GPU-friendly settings
+# If CUDA is available, enable GPU-friendly settings
 if use_cuda:
     try:
         torch.backends.cudnn.benchmark = True
@@ -1286,19 +1359,19 @@ if use_cuda:
     except Exception as e:
         print(f"⚠️ Could not enable cuDNN runtime: {e}")
 
-    try:
-        with torch.no_grad():
-            dummy = torch.zeros(1, 3, 640, 640, device=device)
-            for _ in range(10):
-                _ = yolo_model(dummy, verbose=False)
-        print("✅ GPU warmed up")
-    except Exception as e:
-        print(f"⚠️ YOLO GPU warm-up failed: {e}")
+    # Warm up whichever model is primary
+    if _primary_model is not None:
+        try:
+            with torch.no_grad():
+                dummy = torch.zeros(1, 3, 640, 640, device=device)
+                for _ in range(10):
+                    _ = _primary_model(dummy, verbose=False)
+            print("✅ GPU warmed up")
+        except Exception as e:
+            print(f"⚠️ GPU warm-up failed: {e}")
 
-    # Optional: torch.compile for ~20-40 % extra GPU throughput (PyTorch ≥ 2.0).
-    # "reduce-overhead" removes Python-side interpreter overhead on every call;
-    # fullgraph=False is safe for models with dynamic control flow.
-    if hasattr(torch, "compile"):
+    # Optional: torch.compile for ~20-40% extra GPU throughput (PyTorch ≥ 2.0).
+    if hasattr(torch, "compile") and yolo_model is not None:
         try:
             yolo_model.model = torch.compile(
                 yolo_model.model, mode="reduce-overhead", fullgraph=False
@@ -1768,11 +1841,17 @@ def _classify_label(label: str, cls_id: int | None) -> dict:
     is_animal = lbl in animal_labels
     plate_labels = {"license plate", "plate", "number plate"}
     is_plate = lbl in plate_labels
+    fire_labels = {"fire", "smoke", "flame", "fire_smoke"}
+    is_fire = lbl in fire_labels
+    face_labels = {"face"}
+    is_face = lbl in face_labels or "face" in lbl
     return {
         "is_person": is_person,
         "is_vehicle": is_vehicle,
         "is_animal": is_animal,
         "is_plate": is_plate,
+        "is_fire": is_fire,
+        "is_face": is_face,
     }
 
 
@@ -1791,6 +1870,10 @@ def _class_matches(det, classes) -> bool:
         if key == "animal" and det.get("is_animal"):
             return True
         if key in ("plate", "license_plate", "license plate") and det.get("is_plate"):
+            return True
+        if key in ("fire", "smoke") and det.get("is_fire"):
+            return True
+        if key == "face" and det.get("is_face"):
             return True
         if key == label or key in label:
             return True
@@ -3231,6 +3314,8 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
 # FRAME PROCESSING (OPTIMIZED)
 # --------------------------------------------------
 def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
+    if DISABLE_DRAWING:
+        return
     """
     High-quality bounding-box overlay:
       • Corner-bracket style (L-shapes at each corner) instead of a full rectangle
@@ -3328,6 +3413,15 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
             if is_in_roi:
                 color = (0, 165, 255)
                 draw_label = f"{raw_name} (IN ROI)" if is_known else "IN ROI"
+            elif det.get("is_fire"):
+                color = (0, 80, 255)
+                draw_label = f"\ud83d\udd25 {det.get('label', 'FIRE').upper()}"
+            elif det.get("is_face") and det.get("source") == "face_det":
+                color = (255, 255, 0)
+                draw_label = "Face"
+            elif det.get("is_plate") or det.get("source") == "lpd":
+                color = (0, 255, 128)
+                draw_label = "Plate"
             else:
                 color = (0, 255, 0)
                 draw_label = raw_name if is_known else ""
@@ -3471,54 +3565,58 @@ def process_frame(
     # low-confidence detections that ByteTracker needs for its rescue pool.
     # Default raised to 0.15 in sync with BT_TRACK_LOW_THRESH.
     _yolo_conf_thr = max(0.01, float(os.getenv("BT_TRACK_LOW_THRESH", "0.15")))
-    with torch.inference_mode():
-        with torch.cuda.amp.autocast(enabled=amp_enabled):
-            if use_tiling:
-                tile_w = max(1, orig_w // 2)
-                tile_h = max(1, orig_h // 2)
-                tiles = [
-                    (0, 0, tile_w, tile_h),
-                    (tile_w, 0, orig_w, tile_h),
-                    (0, tile_h, tile_w, orig_h),
-                    (tile_w, tile_h, orig_w, orig_h),
-                ]
-                for x0, y0, x1, y1 in tiles:
-                    tile = frame[y0:y1, x0:x1]
-                    if tile.size == 0:
-                        continue
-                    results = yolo_model(tile, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
-                    for b in results.boxes:
-                        cls_id = None
-                        conf = None
-                        try:
-                            cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
-                        except Exception:
+
+    # --- Run general YOLO model (MODEL_SELECT 1, 5, 6) ---
+    results = None
+    if yolo_model is not None:
+        with torch.inference_mode():
+            with torch.cuda.amp.autocast(enabled=amp_enabled):
+                if use_tiling:
+                    tile_w = max(1, orig_w // 2)
+                    tile_h = max(1, orig_h // 2)
+                    tiles = [
+                        (0, 0, tile_w, tile_h),
+                        (tile_w, 0, orig_w, tile_h),
+                        (0, tile_h, tile_w, orig_h),
+                        (tile_w, tile_h, orig_w, orig_h),
+                    ]
+                    for x0, y0, x1, y1 in tiles:
+                        tile = frame[y0:y1, x0:x1]
+                        if tile.size == 0:
+                            continue
+                        results = yolo_model(tile, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
+                        for b in results.boxes:
                             cls_id = None
-                        try:
-                            conf = float(b.conf[0]) if hasattr(b, "conf") else None
-                        except Exception:
                             conf = None
-                        if (
-                            PERSON_CLASS_IDS
-                            and cls_id is not None
-                            and cls_id not in PERSON_CLASS_IDS
-                        ):
-                            continue
-                        if conf is not None and conf < YOLO_MIN_CONF:
-                            continue
-                        bx1, by1, bx2, by2 = b.xyxy[0].tolist()
-                        raw_dets.append(
-                            {
-                                "box": [bx1 + x0, by1 + y0, bx2 + x0, by2 + y0],
-                                "cls_id": cls_id,
-                                "conf": conf,
-                                "label": _label_for(cls_id),
-                            }
-                        )
-                processed_h, processed_w = orig_h, orig_w
-                results = None
-            else:
-                results = yolo_model(small, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
+                            try:
+                                cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
+                            except Exception:
+                                cls_id = None
+                            try:
+                                conf = float(b.conf[0]) if hasattr(b, "conf") else None
+                            except Exception:
+                                conf = None
+                            if (
+                                PERSON_CLASS_IDS
+                                and cls_id is not None
+                                and cls_id not in PERSON_CLASS_IDS
+                            ):
+                                continue
+                            if conf is not None and conf < YOLO_MIN_CONF:
+                                continue
+                            bx1, by1, bx2, by2 = b.xyxy[0].tolist()
+                            raw_dets.append(
+                                {
+                                    "box": [bx1 + x0, by1 + y0, bx2 + x0, by2 + y0],
+                                    "cls_id": cls_id,
+                                    "conf": conf,
+                                    "label": _label_for(cls_id),
+                                }
+                            )
+                    processed_h, processed_w = orig_h, orig_w
+                    results = None
+                else:
+                    results = yolo_model(small, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
     # Note: torch.cuda.synchronize() removed — accessing tensor data (.tolist(),
     # .cls, .conf) already triggers an implicit sync.  The explicit call was
     # adding ~2-5 ms of pure wait per frame across all 4 camera threads.
@@ -3570,8 +3668,76 @@ def process_frame(
                     "cls_id": cls_id,
                     "conf": conf,
                     "label": _label_for(cls_id),
+                    "source": "yolo",
                 }
             )
+
+    # --- Run specialized models based on MODEL_SELECT ---
+    def _run_specialized_model(model, input_frame, model_name, scale_x=1.0, scale_y=1.0):
+        """Run a specialized YOLO model and return raw detections."""
+        spec_dets = []
+        if model is None:
+            return spec_dets
+        try:
+            spec_names = getattr(model, "names", {})
+            spec_results = model(input_frame, imgsz=yolo_imgsz, verbose=False, conf=0.25, iou=0.45)[0]
+            for b in spec_results.boxes:
+                try:
+                    cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
+                except Exception:
+                    cls_id = None
+                try:
+                    conf = float(b.conf[0]) if hasattr(b, "conf") else None
+                except Exception:
+                    conf = None
+                if conf is not None and conf < 0.20:
+                    continue
+                sx1, sy1, sx2, sy2 = b.xyxy[0].tolist()
+                sx1 *= scale_x
+                sx2 *= scale_x
+                sy1 *= scale_y
+                sy2 *= scale_y
+                # Get label from model's class names
+                spec_label = str(spec_names.get(cls_id, cls_id)) if isinstance(spec_names, dict) else str(cls_id)
+                spec_dets.append({
+                    "box": [sx1, sy1, sx2, sy2],
+                    "cls_id": cls_id,
+                    "conf": conf,
+                    "label": spec_label,
+                    "source": model_name,
+                })
+        except Exception as e:
+            logger.warning(f"[{model_name}] inference error: {e}")
+        return spec_dets
+
+    _spec_scale_x = orig_w / processed_w if processed_w else 1.0
+    _spec_scale_y = orig_h / processed_h if processed_h else 1.0
+
+    with torch.inference_mode():
+        with torch.cuda.amp.autocast(enabled=amp_enabled):
+            # Face detection model (MODEL_SELECT 2, 5, 7)
+            if face_det_model is not None:
+                _run_face = (MODEL_SELECT in (2, 7)) or (cam_frame_counter % max(1, FACE_DET_EVERY_N_FRAMES) == 0)
+                if _run_face:
+                    raw_dets.extend(_run_specialized_model(
+                        face_det_model, small, "face_det", _spec_scale_x, _spec_scale_y
+                    ))
+
+            # Fire/smoke model (MODEL_SELECT 3, 5, 7)
+            if fire_model is not None:
+                _run_fire = (MODEL_SELECT in (3, 7)) or (cam_frame_counter % max(1, FIRE_EVERY_N_FRAMES) == 0)
+                if _run_fire:
+                    raw_dets.extend(_run_specialized_model(
+                        fire_model, small, "fire", _spec_scale_x, _spec_scale_y
+                    ))
+
+            # License plate model (MODEL_SELECT 4, 5, 7)
+            if lpd_model is not None:
+                _run_lpd = (MODEL_SELECT in (4, 7)) or (cam_frame_counter % max(1, LPD_EVERY_N_FRAMES) == 0)
+                if _run_lpd:
+                    raw_dets.extend(_run_specialized_model(
+                        lpd_model, small, "lpd", _spec_scale_x, _spec_scale_y
+                    ))
 
     t_pre_track = time.perf_counter()
     if USE_BYTETRACK:
@@ -3683,6 +3849,9 @@ def process_frame(
         is_vehicle = class_flags.get("is_vehicle")
         is_animal = class_flags.get("is_animal")
         is_plate = class_flags.get("is_plate")
+        is_fire = class_flags.get("is_fire")
+        is_face = class_flags.get("is_face")
+        det_source = det.get("source", "yolo")
 
         if is_person and i in batch_results:
             name, _score, face_emb = batch_results[i]
@@ -3774,6 +3943,18 @@ def process_frame(
                     display_name, f"P3 | CAM{_camera_key(camera_id)} | PERSON_DETECTED"
                 )
                 alert_sent = True
+
+        # Fire/smoke alerts — high priority (P0)
+        if is_fire:
+            _fire_alert_key = f"fire:{_camera_key(camera_id)}:{label}"
+            if _should_emit_known_detect(_fire_alert_key, ts):
+                _fire_conf = det.get("conf", 0)
+                send_alert(
+                    "FIRE_ALERT",
+                    f"P0 | CAM{_camera_key(camera_id)} | {label.upper()} DETECTED | conf={_fire_conf:.0%}",
+                )
+                alert_sent = True
+
         if PROCESS_FRAME_DEBUG:
             print(f"  Alert sent: {alert_sent}")
 
@@ -3809,6 +3990,24 @@ def process_frame(
         if is_in_roi:
             color = (0, 165, 255)
             draw_label = f"{display_name} (IN ROI)" if name != "Unknown" else "IN ROI"
+        elif is_fire:
+            # Fire/smoke: bright orange-red
+            color = (0, 80, 255)
+            draw_label = f"🔥 {label.upper()}" if label else "FIRE"
+            if det.get("conf"):
+                draw_label += f" {det['conf']:.0%}"
+        elif is_face and det_source == "face_det":
+            # Dedicated face detection: cyan
+            color = (255, 255, 0)
+            draw_label = f"Face"
+            if det.get("conf"):
+                draw_label += f" {det['conf']:.0%}"
+        elif is_plate or det_source == "lpd":
+            # License plate: green
+            color = (0, 255, 128)
+            draw_label = f"Plate"
+            if det.get("conf"):
+                draw_label += f" {det['conf']:.0%}"
         else:
             color = (0, 255, 0)
             draw_label = display_name if name != "Unknown" else ""
@@ -3873,6 +4072,9 @@ def process_frame(
                 "is_vehicle": is_vehicle,
                 "is_animal": is_animal,
                 "is_plate": is_plate,
+                "is_fire": is_fire,
+                "is_face": is_face,
+                "source": det_source,
                 "work_seconds": work_seconds,
                 "work_key": work_key,
 
