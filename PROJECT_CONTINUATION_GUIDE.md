@@ -57,6 +57,8 @@ cd ../..
 uv run python app/server.py
 ```
 
+https://drive.google.com/drive/u/0/folders/1InDJdI2GihUHeM50pL2fC3B_eKr1-KhR
+
 ## 🔍 Troubleshooting Checklist
 - [ ] **Python Version**: Must be 3.10.x.
 - [ ] **CUDA**: Ensure NVIDIA drivers and Toolkit are installed if using GPU.
