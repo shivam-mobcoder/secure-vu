@@ -1,18 +1,19 @@
 import { useState } from 'react';
-import { User, Mail, Tag, Loader2, CheckCircle2, XCircle, Shield } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { enrollFrames } from '../services/faceServices';
 
 /**
  * IdentityForm
  * Collects person details and submits enrollment request.
- *
- * Props:
- *   capturedFrames: string[] — base64 data-URIs from CapturePanel
- *   onSuccess() — called after successful enrollment
- *   onCancel() — called when user cancels
  */
 export default function IdentityForm({ capturedFrames = [], enrolledNames = [], onSuccess, onCancel }) {
-    const [form, setForm] = useState({ name: '', role: 'employee', notes: '' });
+    const [form, setForm] = useState({
+        name: '',
+        email: '',
+        role: 'employee',
+        organization: '',
+        notes: ''
+    });
     const [status, setStatus] = useState('idle');   // idle | loading | success | error
     const [message, setMessage] = useState('');
     const [livenessScore, setLivenessScore] = useState(null);
@@ -47,7 +48,10 @@ export default function IdentityForm({ capturedFrames = [], enrolledNames = [], 
         setLivenessScore(null);
 
         try {
+            // Include extra info in notes for the backend
+            const combinedNotes = `Email: ${form.email} | Org: ${form.organization} | ${form.notes}`;
             const result = await enrollFrames(form.name.trim(), capturedFrames);
+
             setLivenessScore(result.liveness_score ?? null);
             if (result.status === 'ok') {
                 setStatus('success');
@@ -66,26 +70,22 @@ export default function IdentityForm({ capturedFrames = [], enrolledNames = [], 
     function handleCancel() {
         setStatus('idle');
         setMessage('');
-        setForm({ name: '', role: 'employee', notes: '' });
+        setForm({ name: '', email: '', role: 'employee', organization: '', notes: '' });
         setConsent(false);
         if (onCancel) onCancel();
     }
 
     return (
         <form onSubmit={handleSubmit} style={styles.form}>
-            <h3 style={styles.heading}>Person Details</h3>
-
             {/* Name */}
             <div style={styles.field}>
-                <label style={styles.label}>
-                    <User size={13} style={{ marginRight: 4 }} />Full Name *
-                </label>
+                <label style={styles.label}>Full Name</label>
                 <input
                     name="name"
                     type="text"
                     value={form.name}
                     onChange={handleChange}
-                    placeholder="e.g. Ritik Sharma"
+                    placeholder="e.g. Jane Doe"
                     required
                     style={styles.input}
                     list="enrolled-names-list"
@@ -97,67 +97,62 @@ export default function IdentityForm({ capturedFrames = [], enrolledNames = [], 
                 </datalist>
             </div>
 
-            {/* Re-enrollment notice */}
-            {form.name.trim() && enrolledNames.includes(form.name.trim()) && (
-                <div style={styles.reEnrollNotice}>
-                    Adding more data to existing profile for <strong>{form.name.trim()}</strong>.
-                    This improves recognition accuracy.
-                </div>
-            )}
+            {/* Email / ID */}
+            <div style={styles.field}>
+                <label style={styles.label}>Email / Employee ID</label>
+                <input
+                    name="email"
+                    type="text"
+                    value={form.email}
+                    onChange={handleChange}
+                    placeholder="jane.doe@company.com"
+                    style={styles.input}
+                />
+            </div>
 
             {/* Role */}
             <div style={styles.field}>
-                <label style={styles.label}>
-                    <Tag size={13} style={{ marginRight: 4 }} />Role
-                </label>
-                <select name="role" value={form.role} onChange={handleChange} style={styles.input}>
-                    <option value="employee">Employee</option>
-                    <option value="contractor">Contractor</option>
-                    <option value="visitor">Visitor</option>
-                    <option value="vip">VIP</option>
-                </select>
+                <label style={styles.label}>Role</label>
+                <div style={styles.selectWrapper}>
+                    <select name="role" value={form.role} onChange={handleChange} style={styles.input}>
+                        <option value="employee">Employee</option>
+                        <option value="contractor">Contractor</option>
+                        <option value="visitor">Visitor</option>
+                        <option value="vip">VIP</option>
+                    </select>
+                </div>
             </div>
 
-            {/* Notes (optional) */}
+            {/* Organization */}
             <div style={styles.field}>
-                <label style={styles.label}>
-                    <Mail size={13} style={{ marginRight: 4 }} />Notes (optional)
-                </label>
+                <label style={styles.label}>Organization (Optional)</label>
                 <input
-                    name="notes"
+                    name="organization"
                     type="text"
-                    value={form.notes}
+                    value={form.organization}
                     onChange={handleChange}
-                    placeholder="Dept, ID, email…"
+                    placeholder="Department or Company"
                     style={styles.input}
                 />
             </div>
 
             {/* Consent */}
-            <label style={styles.consent}>
-                <input
-                    type="checkbox"
-                    checked={consent}
-                    onChange={e => setConsent(e.target.checked)}
-                    style={{ marginRight: 8, accentColor: '#22c55e' }}
-                />
-                <Shield size={13} style={{ marginRight: 4, color: '#22c55e' }} />
-                I consent to biometric face data being processed and stored securely.
-            </label>
-
-            {/* Frame count badge */}
-            {status !== 'success' && (
-                <div style={{
-                    ...styles.frameBadge,
-                    borderColor: hasFrames ? '#22c55e44' : '#ef444444',
-                    color: hasFrames ? '#86efac' : '#fca5a5',
-                    background: hasFrames ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
-                }}>
-                    {hasFrames
-                        ? `✓ ${capturedFrames.length} frame${capturedFrames.length !== 1 ? 's' : ''} ready`
-                        : '⚠ No frames captured yet — click \"Begin Capture\" in Step 1 first'}
-                </div>
-            )}
+            <div style={styles.consentWrapper}>
+                <label style={styles.consent}>
+                    <input
+                        type="checkbox"
+                        checked={consent}
+                        onChange={e => setConsent(e.target.checked)}
+                        style={styles.checkbox}
+                    />
+                    <div>
+                        <div style={styles.consentLabel}>Biometric Data Consent</div>
+                        <div style={styles.consentText}>
+                            I agree to the collection and processing of my biometric data for security purposes.
+                        </div>
+                    </div>
+                </label>
+            </div>
 
             {/* Status message */}
             {status === 'success' && (
@@ -183,14 +178,6 @@ export default function IdentityForm({ capturedFrames = [], enrolledNames = [], 
             {/* Buttons */}
             <div style={styles.buttonRow}>
                 <button
-                    type="button"
-                    onClick={handleCancel}
-                    style={styles.cancelBtn}
-                    disabled={status === 'loading'}
-                >
-                    Cancel
-                </button>
-                <button
                     type="submit"
                     style={{
                         ...styles.submitBtn,
@@ -200,12 +187,18 @@ export default function IdentityForm({ capturedFrames = [], enrolledNames = [], 
                     disabled={!hasFrames || status === 'loading' || status === 'success'}
                 >
                     {status === 'loading' ? (
-                        <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite', marginRight: 6 }} />Enrolling…</>
-                    ) : status === 'success' ? (
-                        <><CheckCircle2 size={15} style={{ marginRight: 6 }} />Enrolled!</>
+                        <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite', marginRight: 8 }} />Processing…</>
                     ) : (
-                        'Register Face'
+                        'Register Identity'
                     )}
+                </button>
+                <button
+                    type="button"
+                    onClick={handleCancel}
+                    style={styles.cancelBtn}
+                    disabled={status === 'loading'}
+                >
+                    Cancel
                 </button>
             </div>
         </form>
@@ -216,118 +209,119 @@ const styles = {
     form: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 14,
-        background: '#0f172a',
-        borderRadius: 16,
-        padding: 20,
-        boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
-    },
-    heading: {
-        margin: 0,
-        fontSize: 15,
-        fontWeight: 700,
-        color: '#e2e8f0',
+        gap: 20,
     },
     field: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 5,
+        gap: 8,
     },
     label: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: 600,
-        color: '#94a3b8',
-        textTransform: 'uppercase',
-        letterSpacing: '0.04em',
+        color: '#1e293b',
     },
     input: {
-        padding: '9px 12px',
+        padding: '12px 16px',
         borderRadius: 8,
-        border: '1px solid #1e293b',
-        background: '#1e293b',
-        color: '#e2e8f0',
+        border: '1px solid #e2e8f0',
+        background: '#f8fafc',
+        color: '#1e293b',
         fontSize: 14,
         outline: 'none',
-        transition: 'border-color 0.2s',
+        transition: 'all 0.2s',
         width: '100%',
         boxSizing: 'border-box',
+        '&:focus': {
+            borderColor: '#3b82f6',
+            background: '#ffffff',
+            boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.1)',
+        }
+    },
+    selectWrapper: {
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+    },
+    consentWrapper: {
+        padding: '16px',
+        background: '#f8fafc',
+        borderRadius: 12,
+        border: '1px solid #e2e8f0',
     },
     consent: {
         display: 'flex',
-        alignItems: 'center',
+        gap: 12,
+        cursor: 'pointer',
+    },
+    checkbox: {
+        marginTop: '3px',
+        width: '16px',
+        height: '16px',
+        accentColor: '#000000',
+    },
+    consentLabel: {
+        fontSize: 13,
+        fontWeight: 700,
+        color: '#1e293b',
+    },
+    consentText: {
         fontSize: 12,
         color: '#64748b',
-        cursor: 'pointer',
-        lineHeight: 1.4,
-    },
-    frameBadge: {
-        fontSize: 12,
-        fontWeight: 500,
-        padding: '7px 12px',
-        borderRadius: 8,
-        border: '1px solid',
-        textAlign: 'center',
+        lineHeight: 1.5,
+        marginTop: 2,
     },
     successMsg: {
         display: 'flex',
         alignItems: 'flex-start',
         gap: 4,
-        background: 'rgba(34,197,94,0.08)',
-        border: '1px solid rgba(34,197,94,0.3)',
-        color: '#86efac',
+        background: '#f0fdf4',
+        border: '1px solid #bbf7d0',
+        color: '#166534',
         borderRadius: 8,
-        padding: '10px 12px',
+        padding: '12px',
         fontSize: 13,
     },
     errorMsg: {
         display: 'flex',
         alignItems: 'center',
-        background: 'rgba(239,68,68,0.08)',
-        border: '1px solid rgba(239,68,68,0.3)',
-        color: '#fca5a5',
+        background: '#fef2f2',
+        border: '1px solid #fecaca',
+        color: '#991b1b',
         borderRadius: 8,
-        padding: '10px 12px',
+        padding: '12px',
         fontSize: 13,
     },
     buttonRow: {
         display: 'flex',
-        gap: 8,
-        marginTop: 4,
-    },
-    cancelBtn: {
-        flex: 1,
-        padding: '10px',
-        borderRadius: 10,
-        border: '1px solid #334155',
-        background: 'transparent',
-        color: '#94a3b8',
-        fontSize: 14,
-        fontWeight: 600,
-        cursor: 'pointer',
+        gap: 12,
+        marginTop: 8,
     },
     submitBtn: {
-        flex: 2,
+        flex: 1,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '10px 20px',
-        borderRadius: 10,
+        padding: '14px 24px',
+        borderRadius: 8,
         border: 'none',
-        background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
-        color: '#fff',
+        background: '#000000',
+        color: '#ffffff',
         fontSize: 14,
         fontWeight: 700,
-        transition: 'opacity 0.2s',
+        transition: 'all 0.2s',
     },
-    reEnrollNotice: {
-        fontSize: 12,
-        color: '#93c5fd',
-        background: 'rgba(59,130,246,0.08)',
-        border: '1px solid rgba(59,130,246,0.25)',
+    cancelBtn: {
+        flex: 1,
+        padding: '14px 24px',
         borderRadius: 8,
-        padding: '8px 12px',
-        lineHeight: 1.5,
+        border: '1px solid #e2e8f0',
+        background: '#ffffff',
+        color: '#1e293b',
+        fontSize: 14,
+        fontWeight: 600,
+        cursor: 'pointer',
+        textAlign: 'center',
+        transition: 'all 0.2s',
     },
 };

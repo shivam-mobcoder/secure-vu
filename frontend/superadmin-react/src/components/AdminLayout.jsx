@@ -20,7 +20,8 @@ export default function AdminLayout() {
     return <Navigate to="/auth" replace />;
   }
 
-  const initials = "SA";
+  const initials = "A";
+  const userEmail = "admin@internal.com";
 
   function handleLogout() {
     clearAuth();
@@ -73,7 +74,7 @@ export default function AdminLayout() {
 
   return (
     <div className="grid min-h-screen grid-cols-[240px_1fr]">
-      <aside className="flex flex-col border-r border-slate-200 bg-white p-5">
+      <aside className="flex flex-col border-r border-slate-200 bg-white p-5 sticky top-0 h-screen">
         <div className="mb-8 text-lg font-bold text-slate-900">Secure VU</div>
 
         <nav className="flex flex-col gap-1">
@@ -113,22 +114,26 @@ export default function AdminLayout() {
           </NavLink>
         </nav>
 
-        {/* Spacer + Logout */}
-        <div className="mt-auto">
-          <div className="mb-4 h-px bg-slate-200" />
-          <div className="mb-3 px-3">
-            <div className="text-sm font-semibold capitalize text-slate-800">
-              {role.replace(/_/g, " ")}
+        {/* Profile Footer */}
+        <div className="mt-auto pt-6 border-t border-slate-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">
+                {initials}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-900 leading-tight">{userEmail}</span>
+                <span className="text-xs text-slate-500">Super Administrator</span>
+              </div>
             </div>
-            <div className="text-xs text-slate-500">Super Admin Portal</div>
+            <button
+              onClick={handleLogout}
+              className="p-2 text-slate-400 hover:text-red-600 transition"
+              title="Sign out"
+            >
+              <LogOut size={18} />
+            </button>
           </div>
-          <button
-            onClick={handleLogout}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-          >
-            <LogOut size={16} />
-            Logout
-          </button>
         </div>
       </aside>
 
@@ -153,7 +158,7 @@ export default function AdminLayout() {
 
               <div className="flex flex-col">
                 <div className="text-sm font-semibold text-slate-900">{role.replace(/_/g, " ")}</div>
-                <div className="text-xs text-slate-500">admin@securevu.com</div>
+                <div className="text-xs text-slate-500">{userEmail}</div>
               </div>
             </div>
           </div>

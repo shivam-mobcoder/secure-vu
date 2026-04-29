@@ -46,7 +46,7 @@ async function fetchMe(token) {
   return res.json();
 }
 
-const BACKEND_ORIGIN = import.meta.env.VITE_BACKEND_ORIGIN || "https://localhost:8000";
+const BACKEND_ORIGIN = import.meta.env.VITE_BACKEND_ORIGIN || "";
 
 export default function AuthPage() {
   const navigate = useNavigate();
@@ -95,12 +95,13 @@ export default function AuthPage() {
       const me = await fetchMe(token);
       const normalizedRole = String(me?.role || "").toLowerCase().replace(/[-\s]+/g, "_");
 
-      // Persist role for client-side route guards
+      // Persist role and permissions for client-side UI logic
       localStorage.setItem("userRole", normalizedRole);
+      localStorage.setItem("userPermissions", JSON.stringify(me?.permissions || auth?.permissions || []));
 
       if (normalizedRole === "super_admin") {
         navigate("/super-admin/dashboard/client-management", { replace: true });
-      } else if (normalizedRole === "admin") {
+      } else if (normalizedRole === "admin" || normalizedRole === "member") {
         navigate("/admin/dashboard/face/enroll", { replace: true });
       } else {
         const next = `${BACKEND_ORIGIN}/?token=${encodeURIComponent(token)}`;

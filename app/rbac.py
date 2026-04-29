@@ -20,6 +20,7 @@ def _normalize_role(role) -> str:
     raw = raw.replace("-", "_").replace(" ", "_")
     return ROLE_ALIASES.get(raw, raw)
 
+
 ROLE_PERMISSIONS = {
     "super_admin": {
         "clients": {"view"},
@@ -42,6 +43,20 @@ ROLE_PERMISSIONS = {
 }
 
 
+def _get_dynamic_permissions(user_perms) -> dict:
+    """Map dynamic permission keys to RBAC resource actions."""
+    perms = {}
+    if "face_enroll" in user_perms:
+        perms.setdefault("faces", set()).add("enroll")
+    if "recognition_logs" in user_perms:
+        perms.setdefault("faces", set()).add("view")
+    if "live_feed" in user_perms or "feed" in user_perms:
+        perms.setdefault("cameras", set()).add("view")
+        perms.setdefault("webrtc", set()).add("connect")
+        perms.setdefault("alerts", set()).add("view")
+    return perms
+
+
 def can(user, resource: str, action: str) -> bool:
     if not user:
         return False
@@ -49,7 +64,22 @@ def can(user, resource: str, action: str) -> bool:
     if not role:
         return False
     role = _normalize_role(role)
-    perms = ROLE_PERMISSIONS.get(role, {})
+
+    # Member role now uses dynamic permissions from the database
+    if role == "member":
+        user_perms = user.get("permissions") or []
+        perms = _get_dynamic_permissions(user_perms)
+    else:
+        perms = ROLE_PERMISSIONS.get(role, {})
+
+    # DEBUG: logging for 403 investigation
+    try:
+        import logging
+        db_logger = logging.getLogger("rbac")
+        db_logger.debug(f"[RBAC] can(user={user.get('email')}, role={role}, resource={resource}, action={action}) -> perms={perms}")
+    except:
+        pass
+
     if "*" in perms:
         allowed = perms.get("*")
         if allowed and ("*" in allowed or action in allowed):
@@ -59,6 +89,7 @@ def can(user, resource: str, action: str) -> bool:
         return False
     return "*" in allowed or action in allowed
 
+
 def require_admin(handler):
     @wraps(handler)
     async def wrapper(request):
@@ -66,7 +97,9 @@ def require_admin(handler):
         if role not in ("admin", "super_admin"):
             return web.Response(status=403)
         return await handler(request)
+
     return wrapper
+
 
 async def user_can_access_camera(user, camera_id):
     role = _normalize_role(user.get("role"))

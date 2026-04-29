@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { Camera, CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { Camera, CheckCircle2, XCircle, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
 /**
  * CapturePanel — Apple-style guided face capture.
@@ -60,7 +60,7 @@ export default function CapturePanel({ onCapture, onReset }) {
     const [cameraError, setCameraError] = useState(null);
     const [frames, setFrames] = useState([]);
     const [progress, setProgress] = useState(0);
-    const [guidance, setGuidance] = useState('Position your face in the oval');
+    const [guidance, setGuidance] = useState('Position your face within the frame');
     const [cameraReady, setCameraReady] = useState(false);
     const [currentPose, setCurrentPose] = useState(null);
     const [poseAccepted, setPoseAccepted] = useState(false);
@@ -90,7 +90,7 @@ export default function CapturePanel({ onCapture, onReset }) {
         } catch (err) {
             console.error('[CapturePanel] Camera error:', err);
             const msg = err.name === 'NotAllowedError'
-                ? 'Camera permission denied. Please allow camera access and reload.'
+                ? 'Camera permission denied. Please allow camera access.'
                 : `Camera error: ${err.message}`;
             setCameraError(msg);
             setState('error');
@@ -111,7 +111,7 @@ export default function CapturePanel({ onCapture, onReset }) {
         setCameraReady(false);
     }
 
-    // ── Face-guide oval overlay ──────────────────────────────────────────────
+    // ── Rectangular Guide Overlay ──────────────────────────────────────────────
     const drawGuide = useCallback(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -121,66 +121,68 @@ export default function CapturePanel({ onCapture, onReset }) {
         canvas.height = canvas.offsetHeight;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        const bw = canvas.width, bh = canvas.height;
+        const boxW = bw * 0.35, boxH = bh * 0.7;
+        const x = (bw - boxW) / 2, y = (bh - boxH) / 2;
+
         // Semi-transparent mask
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(0, 0, bw, bh);
 
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2 - 10;
-        const rw = canvas.width * 0.28;
-        const rh = canvas.height * 0.42;
-
-        // Cutout
+        // Box cutout
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(cx, cy, rw, rh, 0, 0, Math.PI * 2);
+        ctx.roundRect(x, y, boxW, boxH, 8);
         ctx.clip();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(x, y, boxW, boxH);
         ctx.restore();
 
-        // Oval border — green when idle / capturing, accent when pose accepted
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, rw, rh, 0, 0, Math.PI * 2);
-        ctx.strokeStyle = poseAccepted ? '#3b82f6' : '#22c55e';
+        // White Corner Brackets
+        ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 3;
+        const len = 20;
+
+        // Top Left
+        ctx.beginPath();
+        ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y);
         ctx.stroke();
 
-        // Progress arc
+        // Top Right
+        ctx.beginPath();
+        ctx.moveTo(x + boxW - len, y); ctx.lineTo(x + boxW, y); ctx.lineTo(x + boxW, y + len);
+        ctx.stroke();
+
+        // Bottom Left
+        ctx.beginPath();
+        ctx.moveTo(x, y + boxH - len); ctx.lineTo(x, y + boxH); ctx.lineTo(x + len, y + boxH);
+        ctx.stroke();
+
+        // Bottom Right
+        ctx.beginPath();
+        ctx.moveTo(x + boxW - len, y + boxH); ctx.lineTo(x + boxW, y + boxH); ctx.lineTo(x + boxW, y + boxH - len);
+        ctx.stroke();
+
+        // Thin white border line
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, boxW, boxH);
+
+        // Horizontal midline (alignment guide)
+        ctx.beginPath();
+        ctx.moveTo(x, y + boxH / 2);
+        ctx.lineTo(x + boxW, y + boxH / 2);
+        ctx.stroke();
+
+        // Progress indication on border if capturing
         if (progress > 0 && progress <= TARGET_FRAMES) {
-            const arcFraction = progress / TARGET_FRAMES;
-            ctx.beginPath();
-            ctx.ellipse(cx, cy, rw + 6, rh + 6, 0, -Math.PI / 2, -Math.PI / 2 + arcFraction * Math.PI * 2);
             ctx.strokeStyle = '#22c55e';
             ctx.lineWidth = 4;
-            ctx.lineCap = 'round';
-            ctx.stroke();
-        }
-
-        // Directional arrow indicator during capture
-        if (currentPose && state === 'capturing') {
-            const pose = POSES[poseIndexRef.current];
-            if (pose) {
-                const arrowAngle = (pose.angle * Math.PI) / 180;
-                const arrowLen = rw * 0.35;
-                const ax = cx + Math.sin(arrowAngle) * (rw + 22);
-                const ay = cy - Math.cos(arrowAngle) * (rh + 22);
-
-                // Pulsing dot
-                ctx.beginPath();
-                ctx.arc(ax, ay, 8, 0, Math.PI * 2);
-                ctx.fillStyle = poseAccepted ? '#3b82f6' : '#22c55e';
-                ctx.fill();
-
-                // Small arrow line from oval edge towards the dot
-                const ex = cx + Math.sin(arrowAngle) * (rw + 4);
-                const ey = cy - Math.cos(arrowAngle) * (rh + 4);
-                ctx.beginPath();
-                ctx.moveTo(ex, ey);
-                ctx.lineTo(ax, ay);
-                ctx.strokeStyle = poseAccepted ? '#3b82f6' : '#22c55e';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
+            // Draw progress around the box border
+            const perimeter = 2 * (boxW + boxH);
+            const drawLen = (progress / TARGET_FRAMES) * perimeter;
+            ctx.setLineDash([drawLen, perimeter]);
+            ctx.strokeRect(x, y, boxW, boxH);
+            ctx.setLineDash([]);
         }
 
         animRef.current = requestAnimationFrame(drawGuide);
@@ -265,7 +267,7 @@ export default function CapturePanel({ onCapture, onReset }) {
     }
 
     // ── Guided multi-pose capture ────────────────────────────────────────────
-    async function handleCapture() {
+    async function handleStartCapture() {
         if (state !== 'idle' || !cameraReady) return;
 
         setState('capturing');
@@ -293,7 +295,6 @@ export default function CapturePanel({ onCapture, onReset }) {
 
         // Give a small settle delay before we start sampling diffs
         settleTimerRef.current = setTimeout(() => {
-            const baseData = getComparisonData();
             const baseCentroid = getFaceCentroid();
 
             // For the first frame (center), accept after a short beat
@@ -394,7 +395,7 @@ export default function CapturePanel({ onCapture, onReset }) {
         setProgress(TARGET_FRAMES);
         setFrames([...captured]);
         setState('done');
-        setGuidance(`${captured.length} frames captured — fill in the form below`);
+        setGuidance(`Success: ${captured.length} poses captured`);
 
         if (onCapture) onCapture(captured);
     }
@@ -409,7 +410,7 @@ export default function CapturePanel({ onCapture, onReset }) {
         setState('idle');
         setCurrentPose(null);
         setPoseAccepted(false);
-        setGuidance('Position your face in the oval');
+        setGuidance('Position your face within the frame');
         capturedRef.current = [];
         poseIndexRef.current = 0;
         prevFrameDataRef.current = null;
@@ -419,106 +420,75 @@ export default function CapturePanel({ onCapture, onReset }) {
     // ── Render ───────────────────────────────────────────────────────────────
     return (
         <div style={styles.wrapper}>
-            {/* Camera viewport */}
+            {/* Viewport */}
             <div style={styles.viewport}>
-                <video
-                    ref={videoRef}
-                    style={styles.video}
-                    autoPlay
-                    playsInline
-                    muted
-                />
+                <video ref={videoRef} style={styles.video} autoPlay playsInline muted />
                 <canvas ref={canvasRef} style={styles.canvas} />
 
-                {/* State overlays */}
+                {/* Status Badges */}
+                <div style={styles.qualityBadge}>
+                    <span style={styles.dot} /> Quality: Good
+                </div>
+
+                {/* Overlays */}
                 {state === 'starting' && (
                     <div style={styles.overlay}>
-                        <Loader2 size={36} style={{ animation: 'spin 1s linear infinite', color: '#22c55e' }} />
-                        <p style={styles.overlayText}>Starting camera…</p>
+                        <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: '#fff' }} />
+                        <p style={styles.overlayText}>Warming up camera…</p>
                     </div>
                 )}
                 {state === 'error' && (
                     <div style={styles.overlay}>
-                        <XCircle size={36} color="#ef4444" />
+                        <XCircle size={32} color="#ef4444" />
                         <p style={{ ...styles.overlayText, color: '#ef4444' }}>{cameraError}</p>
                         <button onClick={startCamera} style={styles.retryBtn}>Retry</button>
                     </div>
                 )}
-                {state === 'done' && (
-                    <div style={{ ...styles.overlay, background: 'rgba(0,0,0,0.55)' }}>
-                        <CheckCircle2 size={48} color="#22c55e" />
-                        <p style={{ ...styles.overlayText, color: '#22c55e', fontWeight: 700 }}>
-                            {frames.length} poses captured
-                        </p>
-                        <p style={{ ...styles.overlayText, fontSize: 13, marginTop: 4 }}>
-                            Fill in the details below and click Register
-                        </p>
-                    </div>
-                )}
             </div>
 
-            {/* Guidance + progress */}
+            {/* Guidance */}
             <div style={styles.guidanceRow}>
-                {state === 'capturing' && (
-                    <span style={styles.progressDots}>
-                        {POSES.map((_, i) => (
-                            <span
-                                key={i}
-                                style={{
-                                    ...styles.dot,
-                                    background: i < progress ? '#22c55e' : i === progress ? '#3b82f6' : '#374151',
-                                    transform: i < progress ? 'scale(1.2)' : i === progress ? 'scale(1.35)' : 'scale(1)',
-                                    boxShadow: i === progress ? '0 0 8px rgba(59,130,246,0.6)' : 'none',
-                                }}
-                            />
-                        ))}
-                    </span>
-                )}
-                <span style={styles.guidanceChip}>
-                    {state === 'error' ? (
-                        <><AlertCircle size={13} style={{ marginRight: 4 }} />{cameraError}</>
-                    ) : state === 'capturing' ? (
-                        <>{guidance} <span style={{ opacity: 0.6, marginLeft: 6 }}>({progress}/{TARGET_FRAMES})</span></>
-                    ) : guidance}
+                <span style={{
+                    ...styles.guidanceChip,
+                    background: state === 'capturing' ? '#eff6ff' : '#f8fafc',
+                    color: state === 'capturing' ? '#3b82f6' : '#64748b',
+                    borderColor: state === 'capturing' ? '#dbeafe' : '#e2e8f0',
+                }}>
+                    {state === 'capturing' ? (
+                        <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite', marginRight: 6 }} />{guidance}</>
+                    ) : (guidance)}
                 </span>
             </div>
 
-            {/* Action buttons */}
+            {/* Buttons */}
             <div style={styles.buttonRow}>
                 {state !== 'done' ? (
                     <button
-                        onClick={handleCapture}
+                        onClick={handleStartCapture}
                         disabled={state !== 'idle' || !cameraReady}
                         style={{
-                            ...styles.captureBtn,
-                            opacity: (state !== 'idle' || !cameraReady) ? 0.5 : 1,
+                            ...styles.mainBtn,
+                            opacity: (state !== 'idle' || !cameraReady) ? 0.6 : 1,
                             cursor: (state !== 'idle' || !cameraReady) ? 'not-allowed' : 'pointer',
                         }}
                     >
-                        {state === 'capturing' ? (
-                            <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite', marginRight: 6 }} />Scanning Poses…</>
-                        ) : (
-                            <><Camera size={16} style={{ marginRight: 6 }} />Start Face Scan</>
-                        )}
+                        <Camera size={16} style={{ marginRight: 8 }} />
+                        {state === 'capturing' ? `Capturing (${progress}/${TARGET_FRAMES})` : 'Capture'}
                     </button>
                 ) : (
                     <button onClick={handleReset} style={styles.resetBtn}>
-                        <Camera size={16} style={{ marginRight: 6 }} />Re-capture
+                        <RefreshCw size={14} style={{ marginRight: 8 }} />
+                        Retake Scan
                     </button>
                 )}
             </div>
 
-            {/* Thumbnail strip */}
+            {/* Pose Strip */}
             {frames.length > 0 && (
-                <div style={styles.thumbStrip}>
+                <div style={styles.poseStrip}>
                     {frames.map((src, i) => (
                         <div key={i} style={styles.thumbWrap}>
-                            <img
-                                src={src}
-                                alt={`Pose ${i + 1}`}
-                                style={styles.thumb}
-                            />
-                            <span style={styles.thumbLabel}>{POSES[i]?.id || i + 1}</span>
+                            <img src={src} alt="pose" style={styles.thumb} />
                         </div>
                     ))}
                 </div>
@@ -534,25 +504,22 @@ const styles = {
     wrapper: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 12,
-        background: '#0f172a',
-        borderRadius: 16,
-        padding: 16,
-        boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
+        gap: 16,
+        background: '#ffffff',
     },
     viewport: {
         position: 'relative',
         borderRadius: 12,
         overflow: 'hidden',
-        background: '#000',
+        background: '#f1f5f9',
         aspectRatio: '16/9',
         width: '100%',
+        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)',
     },
     video: {
         width: '100%',
         height: '100%',
         objectFit: 'cover',
-        display: 'block',
         transform: 'scaleX(-1)',
     },
     canvas: {
@@ -560,7 +527,27 @@ const styles = {
         inset: 0,
         width: '100%',
         height: '100%',
-        pointerEvents: 'none',
+    },
+    qualityBadge: {
+        position: 'absolute',
+        top: 12,
+        right: 12,
+        background: 'rgba(15, 23, 42, 0.8)',
+        color: '#fff',
+        fontSize: 11,
+        fontWeight: 600,
+        padding: '5px 10px',
+        borderRadius: 20,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        backdropFilter: 'blur(4px)',
+    },
+    dot: {
+        width: 6,
+        height: 6,
+        background: '#22c55e',
+        borderRadius: '50%',
     },
     overlay: {
         position: 'absolute',
@@ -569,113 +556,90 @@ const styles = {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(0,0,0,0.72)',
+        background: 'rgba(15, 23, 42, 0.6)',
+        backdropFilter: 'blur(2px)',
         gap: 12,
     },
     overlayText: {
-        color: '#e2e8f0',
+        color: '#fff',
         fontSize: 14,
-        textAlign: 'center',
-        maxWidth: 260,
+        fontWeight: 500,
         margin: 0,
     },
     retryBtn: {
-        marginTop: 8,
-        padding: '8px 20px',
-        borderRadius: 8,
+        padding: '8px 16px',
+        borderRadius: 6,
         border: 'none',
-        background: '#3b82f6',
-        color: '#fff',
-        fontSize: 13,
+        background: '#fff',
+        color: '#0f172a',
+        fontSize: 12,
+        fontWeight: 700,
         cursor: 'pointer',
-        fontWeight: 600,
     },
     guidanceRow: {
         display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        minHeight: 28,
+        justifyContent: 'center',
     },
     guidanceChip: {
         display: 'inline-flex',
         alignItems: 'center',
-        background: 'rgba(34,197,94,0.12)',
-        color: '#86efac',
         fontSize: 12,
-        fontWeight: 500,
-        padding: '4px 12px',
-        borderRadius: 99,
-        border: '1px solid rgba(34,197,94,0.25)',
-    },
-    progressDots: {
-        display: 'flex',
-        gap: 5,
-        alignItems: 'center',
-    },
-    dot: {
-        width: 8,
-        height: 8,
-        borderRadius: '50%',
-        display: 'inline-block',
-        transition: 'all 0.3s ease',
+        fontWeight: 600,
+        padding: '6px 16px',
+        borderRadius: 30,
+        border: '1px solid',
+        textAlign: 'center',
     },
     buttonRow: {
         display: 'flex',
-        gap: 8,
+        justifyContent: 'center',
     },
-    captureBtn: {
-        flex: 1,
+    mainBtn: {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '10px 20px',
-        borderRadius: 10,
+        padding: '12px 32px',
+        borderRadius: 8,
         border: 'none',
-        background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-        color: '#fff',
+        background: '#000000',
+        color: '#ffffff',
         fontSize: 14,
-        fontWeight: 600,
-        transition: 'opacity 0.2s',
+        fontWeight: 700,
+        cursor: 'pointer',
+        minWidth: 160,
+        transition: 'all 0.2s',
     },
     resetBtn: {
-        flex: 1,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '10px 20px',
-        borderRadius: 10,
-        border: '1px solid #334155',
-        background: 'transparent',
-        color: '#94a3b8',
+        padding: '12px 32px',
+        borderRadius: 8,
+        border: '1px solid #e2e8f0',
+        background: '#ffffff',
+        color: '#64748b',
         fontSize: 14,
         fontWeight: 600,
         cursor: 'pointer',
     },
-    thumbStrip: {
+    poseStrip: {
         display: 'flex',
-        gap: 6,
+        gap: 8,
         overflowX: 'auto',
-        paddingBottom: 4,
+        padding: '4px 0',
     },
     thumbWrap: {
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 2,
         flexShrink: 0,
+        width: 60,
+        height: 40,
+        borderRadius: 4,
+        overflow: 'hidden',
+        border: '1px solid #e2e8f0',
     },
     thumb: {
-        width: 56,
-        height: 42,
+        width: '100%',
+        height: '100%',
         objectFit: 'cover',
-        borderRadius: 6,
-        border: '2px solid #22c55e',
         transform: 'scaleX(-1)',
-    },
-    thumbLabel: {
-        fontSize: 9,
-        color: '#64748b',
-        fontWeight: 600,
-        textTransform: 'uppercase',
     },
 };

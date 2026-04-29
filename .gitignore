@@ -66,3 +66,6 @@ best_accuracy_model.mlpackage/
 *.npz
 peron_accuracy.py
 run_roi_camera.sh
+tracking/*.json
+*.zip
+

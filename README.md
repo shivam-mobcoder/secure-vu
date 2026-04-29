@@ -1,252 +1,285 @@
-# 🚀 AI Surveillance System (YOLO + ArcFace + WebRTC)
+# � SecureVu — AI-Powered CCTV Surveillance Platform
 
-Real-time person & animal detection, face recognition, and ROI-based alerts using YOLOv8, ArcFace, DeepSORT, and WebRTC.
+Real-time person detection, face recognition, and rule-based alerting using **YOLOv8**, **ArcFace (InsightFace)**, and **WebRTC** — all served over a single HTTPS endpoint.
 
 ---
 
 ## ✨ Features
 
-- **Real-time Detection**: People + 17 animal types (cat, dog, bird, snake, reptile, horse, rabbit, etc.)
-- **Face Recognition**: ArcFace with persistent identity database
-- **ROI Alerts**: Configurable zones with entry/exit detection
-- **WebRTC Streaming**: Low-latency video with DataChannel alerts
-- **Production Ready**: GPU/CPU switch, modular architecture
-- **Alert System**: Real-time notifications via WebRTC DataChannel
+| Feature | Details |
+|---------|---------|
+| **Real-time Detection** | YOLOv8 single-class person model with optional multi-class support |
+| **Face Recognition** | ArcFace / InsightFace with per-client scoped face databases |
+| **Persistent Tracking** | ByteTrack + EMA smoothing for stable, flicker-free bounding boxes |
+| **Work Timers** | Per-person timers with cross-camera handoff via face embeddings |
+| **ROI / Zone / Line Rules** | Configurable intrusion zones, virtual lines, parking rules |
+| **Event Clips** | Automatic MP4 clip capture on rule violations |
+| **WebRTC Streaming** | Ultra low-latency HD video (1280×720 @ 30 fps) |
+| **Multi-tenant RBAC** | Super Admin → Admin → Member role hierarchy with JWT auth |
+| **React Dashboard** | Modern Vite + React SPA for all user roles |
 
 ---
 
 ## 🏗️ Project Structure
 
-\`\`\`
-object-detection-main/
-├── server.py                    # Main production server
-├── requirements.txt             # Python dependencies
-├── runtime.txt                  # Python 3.10.12
-├── render.yaml                  # Render.com deployment config
-├── .gitignore                  # Git ignore patterns
-├── cert.pem                    # SSL certificate
-├── key.pem                     # SSL key
-├── tracker_id_map.json         # Tracker persistence
-├── static/                     # Frontend
-│   ├── index.html             # Main interface
-│   ├── css/                   # Stylesheets
-│   └── js/                    # JavaScript modules
-├── server_pkg/                 # Backend modules
-│   ├── models.py              # Model loading (GPU/CPU switch)
-│   ├── processing.py          # Frame processing
-│   ├── webrtc.py              # WebRTC handlers
-│   ├── alerts.py              # Alert system
-│   ├── routes.py              # HTTP routes
-│   └── utils.py               # Utilities
-├── models/                     # Trained models
-│   ├── yolo/best.pt           # YOLOv8 (17 animals + person)
-│   ├── arcface/face_db.npz    # Face recognition database
-│   └── roi/                   # ROI configurations
-└── yolo_51/code/modules/      # Face recognition library
-\`\`\`
+```text
+secure-vu/
+├── app/                        # Backend (Python / aiohttp)
+│   ├── server.py               # Main server — routes, WebRTC, YOLO, drawing
+│   ├── db.py                   # Async PostgreSQL (asyncpg)
+│   ├── auth.py                 # JWT token creation & validation
+│   ├── rbac.py                 # Role-based access control
+│   ├── faceid.py               # FaceID manager (InsightFace wrapper)
+│   ├── liveness.py             # Anti-spoofing liveness detection
+│   ├── tracking.py             # PIDTracker — persistent object IDs
+│   └── middleware.py           # Auth middleware for aiohttp
+├── frontend/
+│   └── superadmin-react/       # Vite + React + TailwindCSS dashboard
+├── models/
+│   ├── yolo/                   # YOLO weights (secure_cv_best.pt)
+│   └── arcface/face_db/        # Per-client face embedding databases
+├── pre_trained/insightface/    # InsightFace model pack (buffalo_l)
+├── migrations/
+│   └── 001_init.sql            # PostgreSQL schema (clients, users, cameras)
+├── certs/                      # Self-signed TLS certs for HTTPS/WebRTC
+├── config/                     # Runtime flags (JSON, auto-generated)
+├── static/                     # Legacy HTML client
+├── scripts/                    # Utility / test scripts
+├── docker-compose.yml          # Full-stack orchestration (DB + App)
+├── Dockerfile                  # App container
+├── pyproject.toml              # Python project & uv config
+└── .env                        # Environment variables (secrets, tuning)
+```
 
 ---
 
-## 🚀 Quick Start (Development)
+## 📋 Prerequisites
 
-### 1. Clone & Setup
-\`\`\`bash
-git clone https://gitlab.com/hardik477/object-detection.git
-cd object-detection-main
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-\`\`\`
+| Tool | Version | Purpose |
+|------|---------|---------|
+| **Python** | 3.10.x | Backend runtime (must be `>=3.10, <3.11`) |
+| **uv** | latest | Python package manager (replaces pip/venv) |
+| **Node.js** | 18+ | Frontend build toolchain |
+| **PostgreSQL** | 15+ | Primary database |
+| **NVIDIA GPU + CUDA** | 12.x | GPU acceleration (optional, falls back to CPU) |
+| **Docker & Docker Compose** | latest | For containerized deployment |
 
-### 2. Install Dependencies
-\`\`\`bash
-pip install -r requirements.txt
-\`\`\`
+---
 
-### 3. Generate SSL Certificates
-\`\`\`bash
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+## 🚀 Setup from Scratch (Local Development)
+
+### Step 1 — Clone the Repository
+
+```bash
+git clone <repo-url> secure-vu
+cd secure-vu
+```
+
+### Step 2 — Configure Environment Variables
+
+```bash
+cp .env.example .env   # if .env.example exists, otherwise edit .env directly
+```
+
+Edit `.env` with your values:
+
+```dotenv
+# PostgreSQL
+DB_USER=<your-db-user>
+DB_PASS=<your-db-password>
+DB_NAME=cctv_platform
+DB_HOST=127.0.0.1
+
+# JWT Secret — generate with: python -c "import secrets; print(secrets.token_hex(64))"
+JWT_SECRET=<your-random-64-byte-hex>
+
+# Default accounts (created on first startup)
+SUPER_EMAIL=<super-admin-email>
+SUPER_PASSWORD=<super-admin-password>
+ADMIN_EMAIL=<admin-email>
+ADMIN_PASSWORD=<admin-password>
+
+# RTSP Camera URLs
+# RTSP_URL_1=rtsp://<user>:<pass>@<ip>:554/cam/realmonitor?channel=1&subtype=0
+# RTSP_URL_2=rtsp://<user>:<pass>@<ip>:554/cam/realmonitor?channel=1&subtype=0
+```
+
+### Step 3 — Start PostgreSQL
+
+**Option A — Docker (recommended):**
+
+```bash
+docker-compose up -d db
+```
+
+**Option B — Local Postgres:**
+
+Ensure PostgreSQL 15+ is running on `localhost:5432`.
+
+### Step 4 — Run Database Migrations
+
+```bash
+psql -h 127.0.0.1 -U cctv_user -d cctv_platform -f migrations/001_init.sql
+```
+
+> **Note:** If using Docker Compose, the migration runs automatically on the first `docker-compose up` via the `docker-entrypoint-initdb.d` mount. You only need to run this manually for a standalone Postgres instance.
+
+This creates the following tables:
+
+| Table | Purpose |
+|-------|---------|
+| `clients` | Multi-tenant organizations |
+| `users` | User accounts (super_admin, admin, member) |
+| `cameras` | Camera records per client |
+| `user_cameras` | Many-to-many user ↔ camera access |
+
+### Step 5 — Generate TLS Certificates
+
+WebRTC requires HTTPS. Generate self-signed certs for local development:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem \
   -days 365 -nodes -subj "/CN=localhost"
-\`\`\`
+```
 
-### 4. Start Server
-\`\`\`bash
-cd app
-source ../.venv/bin/activate
-python server.py
-\`\`\`
+### Step 6 — Install Python Dependencies
 
-### 5. Open in Browser
-\`\`\`
-https://localhost:8000
-\`\`\`
+```bash
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
----
+# Sync all dependencies (creates .venv automatically)
+uv sync
+```
 
-## 🧭 Super Admin React Dashboard (Run Guide)
+### Step 7 — Download / Place AI Models
 
-The React app lives in frontend/superadmin-react and is mounted by the backend at:
+Ensure the following model files are present:
 
-https://localhost:8000/super-admin/dashboard
+```text
+models/yolo/secure_cv_best.pt          # Custom YOLO weights
+pre_trained/insightface/models/buffalo_l/   # InsightFace model pack
+```
 
-### Option A: Production-style (recommended)
+> If models are not in the repo, download them from your team's shared storage and place them in the paths above.
 
-1) Build React frontend
-\`\`\`bash
+### Step 8 — Build the React Frontend
+
+```bash
 cd frontend/superadmin-react
 npm install
 npm run build
-\`\`\`
+cd ../..
+```
 
-2) Start backend server
-\`\`\`bash
-cd app
-source ../.venv/bin/activate
-python server.py
-\`\`\`
+> The built assets are served directly by the Python backend — no separate frontend server needed in production.
 
-3) Open dashboard
-\`\`\`
-https://localhost:8000/super-admin/dashboard
-\`\`\`
+### Step 9 — Start the Server
 
-### Option B: Frontend dev mode (hot reload)
+```bash
+uv run python app/server.py
+```
 
-Keep backend running from app/server.py, then in a second terminal:
+The server starts on `https://localhost:8000` by default.
 
-\`\`\`bash
+### Step 10 — Access the Application
+
+| URL | Purpose |
+|-----|---------|
+| `https://localhost:8000` | Landing page (Login / Signup) |
+| `https://localhost:8000/admin/dashboard` | Admin dashboard |
+| `https://localhost:8000/super-admin/dashboard` | Super Admin dashboard |
+
+> **Browser:** Accept the self-signed certificate warning on first visit.
+
+---
+
+## ⚡ Quick Start (Docker — Full Stack)
+
+If you just want everything running with one command:
+
+```bash
+docker-compose up --build
+```
+
+This starts both `db` (PostgreSQL) and `app` (Python server). Migrations run automatically on first boot.
+
+---
+
+## 🔄 Frontend Development (Hot Reload)
+
+For frontend development with hot reload:
+
+```bash
+# Terminal 1 — Backend
+uv run python app/server.py
+
+# Terminal 2 — Vite dev server (proxies API calls to backend)
 cd frontend/superadmin-react
 npm run dev
-\`\`\`
+```
 
-Open:
-
-http://localhost:5173/super-admin/dashboard
-
-### Notes
-
-- If browser warns about certificate, use Advanced → Proceed (self-signed local cert).
-- The clients page uses /api/super-admin/clients, so backend and login must be active.
+The Vite dev server runs on `https://localhost:5174` and proxies `/offer`, `/ws`, `/api/*` to the backend.
 
 ---
 
-## 🎮 Usage Modes
+## ⚙️ Key Configuration
 
-### 🔵 **Device Mode** (PM Mode)
-- Uses **your device camera** via WebRTC
-- Server processes frames on GPU/CPU
-- Real-time alerts in browser
+### Detection & Tracking Tuning
 
-### 🔴 **CCTV Mode** (Test Mode)
-- Server uses **local webcam** (camera index 0)
-- For testing without device camera
-
-### 🟡 **ROI Management**
-1. Click **Edit ROI** to draw zone
-2. Drag/resize rectangle
-3. Click **Save** to persist
-4. Alerts trigger on: \`ENTERED WEBROI\`, \`EXITED WEBROI\`
-
----
-
-## ⚙️ Configuration
-
-### GPU/CPU Switching
-\`\`\`bash
-# Use GPU (default)
-cd app && source ../.venv/bin/activate && python server.py
-
-# Force CPU mode
-cd app && source ../.venv/bin/activate && USE_GPU=false python server.py
-
-# Force CPU (override)
-cd app && source ../.venv/bin/activate && FORCE_CPU=true python server.py
-\`\`\`
-
-### Environment Variables
 | Variable | Default | Description |
 |----------|---------|-------------|
-| \`USE_GPU\` | \`true\` | Enable/disable GPU acceleration |
-| \`FORCE_CPU\` | \`false\` | Force CPU mode (overrides USE_GPU) |
-| \`PORT\` | \`8000\` | Server port |
+| `YOLO_MIN_CONF` | `0.25` | Minimum YOLO detection confidence |
+| `YOLO_PROCESS_EVERY_N_FRAMES` | `1` | Process every Nth frame (1 = every frame) |
+| `YOLO_INPUT_WIDTH` / `HEIGHT` | `1280` | YOLO inference resolution |
+| `FACE_EVERY_N_FRAMES` | `5` | Run face recognition every Nth frame |
+| `BBOX_SMOOTH_ALPHA` | `0.75` | EMA smoothing weight (higher = smoother) |
+| `BBOX_JUMP_THRESH` | `1.5` | Jump snap threshold (prevents sliding on ID swaps) |
+
+### ByteTrack Parameters
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BT_MATCH_THRESH` | `0.85` | IoU matching threshold for track association |
+| `BT_TRACK_BUFFER` | `90` | Frames to keep lost tracks alive |
+| `BT_TRACK_HIGH_THRESH` | `0.35` | Confidence to create new tracks |
+| `BT_TRACK_LOW_THRESH` | `0.15` | Confidence floor for rescue pool |
+
+### Server & Streaming
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `0.0.0.0` | Bind address |
+| `PORT` | `8000` | Bind port |
+| `SERVER_CAMERA_FPS` | `30` | Target FPS for focus view |
+| `GRID_CAMERA_FPS` | `30` | Target FPS for grid view |
+| `WEBRTC_VIDEO_KBPS` | `6000` | WebRTC video bitrate (kbps) |
+
+### Work Timer & Alerts
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WORK_TIMER_ENABLE` | `1` | Enable per-person work timers |
+| `WORK_TIMER_REQUIRE_ROI` | `0` | Only count time inside ROI |
+| `EVENT_CLIP_ENABLE` | `1` | Enable event clip recording |
+| `EVENT_CLIP_SECONDS` | `8` | Total clip length (seconds) |
 
 ---
 
-## 🚀 Production Deployment (Render.com)
+## 🔧 Maintenance
 
-### 1. Update Files
-Ensure you have:
-- \`requirements.txt\` - Dependencies
-- \`runtime.txt\` - Python 3.10.12
-- \`render.yaml\` - Render configuration
-- \`.gitignore\` - Exclude cache files
-
-### 2. Push to Git
-\`\`\`bash
-git add .
-git commit -m "Production ready"
-git push origin main
-\`\`\`
-
-### 3. Deploy on Render
-1. Go to [render.com](https://render.com)
-2. Create **New Web Service**
-3. Connect your GitHub/GitLab repository
-4. Auto-configures from \`render.yaml\`
-5. Starts with **CPU mode** (\`USE_GPU=false\`)
-
-### 4. Upgrade to GPU (Optional)
-1. Change plan to \`standard-gpu\`
-2. Update environment: \`USE_GPU=true\`
-3. Restart service
-
----
-
-## 🔧 Troubleshooting
-
-### ❌ No Video/Audio
-- Ensure HTTPS (\`https://localhost:8000\`)
-- Check browser console for WebRTC errors
-- Verify SSL certificates exist
-
-### ❌ No Alerts
-- Check DataChannel connection in browser console
-- Verify server logs: \`DataChannel from client: alerts\`
-- Ensure ROI is defined and visible
-
-### ❌ Model Loading Failures
-\`\`\`bash
-# Test model loading
-python3 -c "from server_pkg.models import load_models; load_models()"
-\`\`\`
-
-### ❌ CUDA Errors on Render
-- Set \`USE_GPU=false\` for CPU-only plans
-- Render standard plans don't include GPU
-- Upgrade to \`standard-gpu\` plan for GPU acceleration
-
----
-
-## 📊 Model Information
-
-### YOLO Model (\`best.pt\`)
-- **Classes**: 18 total (person + 17 animals)
-- **Animals**: cat, dog, bird, snake, reptile, horse, rabbit, ferret, raccoon, turtle, tortoise, scorpion, spider, mouse, hamster, rat, guinea_pig
-- **Performance**: ~27ms/frame (GPU), ~200ms/frame (CPU)
-
-### Face Recognition
-- **Model**: InsightFace Buffalo_L
-- **Database**: \`models/arcface/face_db.npz\`
-- **Identities**: 'shivam' (add more via face registration)
+| Task | Command |
+|------|---------|
+| **Reset database** | `docker-compose down -v` ⚠️ *deletes all data* |
+| **Re-run migrations** | `psql -h 127.0.0.1 -U cctv_user -d cctv_platform -f migrations/001_init.sql` |
+| **Rebuild frontend** | `cd frontend/superadmin-react && npm run build` |
+| **Check server logs** | `docker-compose logs -f app` |
+| **Lint Python code** | `uv run ruff check .` |
+| **Dead code audit** | `uv run vulture .` |
 
 ---
 
 ## 📝 License
 
-Proprietary – for internal use only.
-
----
-
-## 🔗 Links
-- **Repository**: https://github.com/Shivam-432-bit/object-detection-main.git
-- **Live Demo**: [Your Render URL after deployment]
-- **Issues**: https://github.com/Shivam-432-bit/object-detection/-/issues
+**Proprietary** — Internal use only for SecureVu project.
