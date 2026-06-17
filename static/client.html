@@ -743,7 +743,7 @@
       }
       if (focusContainerEl) focusContainerEl.style.display = caps.isSuper ? 'none' : 'block';
       if (focusControlsEl) focusControlsEl.style.display = caps.isSuper ? 'none' : 'flex';
-      if (alertsBoxEl) alertsBoxEl.style.display = caps.isSuper ? 'none' : 'flex';
+      if (alertsBoxEl) alertsBoxEl.style.display = 'none'; // Alerts shown in React sidebar
       if (focusRulesPanel) focusRulesPanel.style.display = caps.isSuper ? 'none' : 'block';
 
       if (rulesPanelEl) {
@@ -2333,7 +2333,7 @@
       if (grid) grid.style.display = 'none';
       if (focusContainerEl) focusContainerEl.style.display = 'block';
       if (focusControlsEl) focusControlsEl.style.display = 'flex';
-      if (alertsBoxEl) alertsBoxEl.style.display = 'flex';
+      if (alertsBoxEl) alertsBoxEl.style.display = 'none'; // Alerts shown in React sidebar
       if (focusRulesPanel) focusRulesPanel.style.display = 'block';
       activeVideoEl = focusVideoEl || activeVideoEl;
       activeTileEl = focusContainerEl || activeTileEl;
@@ -4228,6 +4228,16 @@
 
       console.log("📬📬📬 RAW ALERT RECEIVED:", { person, event, timestamp, clipUrl });
 
+      // ── Forward alert to React parent (sidebar) via postMessage ──
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'SECUREVU_ALERT',
+            payload: { person, event, timestamp, clip_url: clipUrl }
+          }, '*');
+        }
+      } catch (e) { /* ignore cross-origin postMessage errors */ }
+
       const div = document.createElement("div");
       div.className = "alert-item";
       const prefix = document.createElement('span');
@@ -4263,7 +4273,7 @@
 
       console.log(`📋 UI Alert Added: ${timestamp} - ${person} - ${event}`);
 
-      // Also highlight new alerts
+      // Highlight new alerts in the hidden div (for debug access if needed)
       div.style.animation = "highlight 2s";
 
       // Add CSS for highlight animation
