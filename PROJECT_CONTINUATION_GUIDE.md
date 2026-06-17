@@ -8,7 +8,7 @@ These files are **NOT** in Git because they are too large or sensitive. You must
 1.  **`.env`**: Your local configuration and secrets.
 2.  **`models/`**: All pre-trained and custom YOLO weights.
 3.  **`pre_trained/`**: InsightFace model packs (buffalo_l).
-4.  **`datasets/`**: (If needed) Your captured training images and analytical data.
+4.  **`datasets/`**: (If needed) Your captured training images. **Note**: You have created `datasets_backup.zip` (2.2GB) which is ready for Google Drive upload.
 5.  **`certs/`**: Your self-signed TLS certificates for HTTPS/WebRTC.
 
 ## 🛠️ Step-by-Step Setup on New Machine

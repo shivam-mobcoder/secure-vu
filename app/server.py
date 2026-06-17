@@ -367,8 +367,9 @@ FACE_ENABLE = os.getenv("FACE_ENABLE", "1").strip() == "1"
 # 4 = License Plate Detection (LPD)
 # 5 = ALL specialized models (YOLO + face det + fire + LPD)
 # 6 = PRODUCTION MODE — secure_cv_best.pt + InsightFace + all features (default)
+# 8 = OPEN WORLD MODE — yolov8s-worldv2.pt (YOLO-World)
 MODEL_SELECT = _int_env("MODEL_SELECT", 6)
-if MODEL_SELECT not in (1, 2, 3, 4, 5, 6, 7):
+if MODEL_SELECT not in (1, 2, 3, 4, 5, 6, 7, 8):
     print(f"⚠️ Invalid MODEL_SELECT={MODEL_SELECT}, defaulting to 7 (full package)")
     MODEL_SELECT = 7
 print(f"🔧 MODEL_SELECT={MODEL_SELECT}")
@@ -1280,9 +1281,11 @@ def _load_yolo_model(path, label="YOLO"):
 
 
 # --- Determine which YOLO weights to use for the general model ---
-_yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7)
+_yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7, 8)
 if _yolo_general_needed:
-    if MODEL_SELECT in (6, 7):
+    if MODEL_SELECT == 8:
+        weights_path = str(REPO_ROOT / "models" / "yolo" / "yolov8s-worldv2.pt")
+    elif MODEL_SELECT in (6, 7):
         # Production/Full mode: always use the high-accuracy model
         weights_path = str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
     else:
