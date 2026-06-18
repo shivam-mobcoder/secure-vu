@@ -1089,54 +1089,38 @@ def enroll_face(name: str, frames: list, client_id=None):
 pid_smooth = {}  # pid -> (x1,y1,x2,y2)
 pid_smooth_lock = threading.Lock()
 
-# Tunable via env:
-#   BBOX_SMOOTH_ALPHA : 0.0-1.0  weight on previous position (higher → smoother/less flicker)
-#   BBOX_JUMP_THRESH  : multiplier of bbox height; if centre moves further than this,
-#                       snap immediately (prevents "box between people" on ID swaps)
-_SMOOTH_ALPHA = float(os.getenv("BBOX_SMOOTH_ALPHA", "0.75"))
-_SMOOTH_JUMP_THRESH = float(os.getenv("BBOX_JUMP_THRESH", "1.5"))
+from bbox_smoother import BBoxSmoother
+
+# Bounding Box Smoothing Configurations
+BBOX_SMOOTHING_MODE = os.getenv("BBOX_SMOOTHING_MODE", "fixed").strip().lower()
+BBOX_FIXED_ALPHA = float(os.getenv("BBOX_FIXED_ALPHA", os.getenv("BBOX_SMOOTH_ALPHA", "0.75")))
+BBOX_ALPHA_HIGH = float(os.getenv("BBOX_ALPHA_HIGH", "0.30"))
+BBOX_ALPHA_MEDIUM = float(os.getenv("BBOX_ALPHA_MEDIUM", "0.55"))
+BBOX_ALPHA_LOW = float(os.getenv("BBOX_ALPHA_LOW", "0.80"))
+BBOX_CONF_HIGH = float(os.getenv("BBOX_CONF_HIGH", "0.85"))
+BBOX_CONF_MEDIUM = float(os.getenv("BBOX_CONF_MEDIUM", "0.60"))
+
+bbox_smoother = BBoxSmoother(
+    mode=BBOX_SMOOTHING_MODE,
+    fixed_alpha=BBOX_FIXED_ALPHA,
+    alpha_high=BBOX_ALPHA_HIGH,
+    alpha_medium=BBOX_ALPHA_MEDIUM,
+    alpha_low=BBOX_ALPHA_LOW,
+    conf_high=BBOX_CONF_HIGH,
+    conf_medium=BBOX_CONF_MEDIUM
+)
 
 
-def smooth_bbox(pid, box, alpha=_SMOOTH_ALPHA):
-    """EMA bbox smoothing with ID-swap / large-jump detection.
-
-    alpha: weight on the *previous* position (0.6 default gives smooth motion
-    with ≤ 1-frame lag for a person walking at normal speed).
-
-    When the detected centre jumps by more than ``_SMOOTH_JUMP_THRESH × prev_height``
-    we snap immediately to the new position instead of blending.  This eliminates
-    the "ghost box drifting between two people" artefact that occurs when
-    ByteTracker swaps track IDs for closely adjacent persons.
-    """
+def smooth_bbox(pid, box, confidence=1.0):
+    """EMA bbox smoothing delegation to BBoxSmoother."""
     with pid_smooth_lock:
         if pid not in pid_smooth:
             pid_smooth[pid] = box
             return box
 
-        px1, py1, px2, py2 = pid_smooth[pid]
-        x1, y1, x2, y2 = box
-
-        # ── Jump detection (ID-swap guard) ───────────────────────────────────
-        old_cx = (px1 + px2) * 0.5
-        old_cy = (py1 + py2) * 0.5
-        new_cx = (x1 + x2) * 0.5
-        new_cy = (y1 + y2) * 0.5
-        prev_h = max(1.0, float(py2 - py1))
-        jump = ((new_cx - old_cx) ** 2 + (new_cy - old_cy) ** 2) ** 0.5
-        if jump > _SMOOTH_JUMP_THRESH * prev_h:
-            # Centre moved more than ~1.2× the person's height in one frame —
-            # almost certainly an ID swap.  Snap to new position to avoid the
-            # interpolated box hanging in the space between two people.
-            pid_smooth[pid] = box
-            return box
-
-        sx1 = int(alpha * px1 + (1 - alpha) * x1)
-        sy1 = int(alpha * py1 + (1 - alpha) * y1)
-        sx2 = int(alpha * px2 + (1 - alpha) * x2)
-        sy2 = int(alpha * py2 + (1 - alpha) * y2)
-
-        pid_smooth[pid] = (sx1, sy1, sx2, sy2)
+        pid_smooth[pid] = bbox_smoother.smooth(pid_smooth[pid], box, confidence)
         return pid_smooth[pid]
+
 
 
 def force_h264(pc):
@@ -3934,7 +3918,7 @@ def process_frame(
                 pid = int(hash(stable_id) & 0x7FFFFFFF)
         except Exception:
             pid = i
-        x1, y1, x2, y2 = smooth_bbox(pid, (x1, y1, x2, y2))
+        x1, y1, x2, y2 = smooth_bbox(pid, (x1, y1, x2, y2), confidence=det.get("conf", 1.0))
         resolved_pids.append((pid, x1, y1, x2, y2))
         class_flags = _classify_label(det.get("label"), det.get("cls_id"))
         if class_flags.get("is_person"):
