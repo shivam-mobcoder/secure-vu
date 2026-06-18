@@ -369,7 +369,7 @@ FACE_ENABLE = os.getenv("FACE_ENABLE", "1").strip() == "1"
 # 6 = PRODUCTION MODE — secure_cv_best.pt + InsightFace + all features (default)
 # 8 = OPEN WORLD MODE — yolov8s-worldv2.pt (YOLO-World)
 MODEL_SELECT = _int_env("MODEL_SELECT", 6)
-if MODEL_SELECT not in (1, 2, 3, 4, 5, 6, 7, 8):
+if MODEL_SELECT not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
     print(f"⚠️ Invalid MODEL_SELECT={MODEL_SELECT}, defaulting to 7 (full package)")
     MODEL_SELECT = 7
 print(f"🔧 MODEL_SELECT={MODEL_SELECT}")
@@ -1280,14 +1280,100 @@ def _load_yolo_model(path, label="YOLO"):
     return model
 
 
+_PRODUCTION_CONFIGS = {
+    6: {
+        "mode": "Production",
+        "variant": "YOLO11m",
+        "weights": "models/yolo/secure_cv_best.pt",
+        "specialized": "Disabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    7: {
+        "mode": "Full Package",
+        "variant": "YOLO11m",
+        "weights": "models/yolo/secure_cv_best.pt",
+        "specialized": "Enabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    9: {
+        "mode": "Production",
+        "variant": "YOLO11l",
+        "weights": "models/yolo/secure_cv_best_l.pt",
+        "specialized": "Disabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    10: {
+        "mode": "Production",
+        "variant": "YOLO11x",
+        "weights": "models/yolo/secure_cv_best_x.pt",
+        "specialized": "Disabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    11: {
+        "mode": "Full Package",
+        "variant": "YOLO11l",
+        "weights": "models/yolo/secure_cv_best_l.pt",
+        "specialized": "Enabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    12: {
+        "mode": "Full Package",
+        "variant": "YOLO11x",
+        "weights": "models/yolo/secure_cv_best_x.pt",
+        "specialized": "Enabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    }
+}
+
+
 # --- Determine which YOLO weights to use for the general model ---
-_yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7, 8)
+_yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7, 8, 9, 10, 11, 12)
 if _yolo_general_needed:
     if MODEL_SELECT == 8:
         weights_path = str(REPO_ROOT / "models" / "yolo" / "yolov8s-worldv2.pt")
-    elif MODEL_SELECT in (6, 7):
-        # Production/Full mode: always use the high-accuracy model
-        weights_path = str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
+    elif MODEL_SELECT in _PRODUCTION_CONFIGS:
+        config = _PRODUCTION_CONFIGS[MODEL_SELECT]
+        prod_weights = config["weights"]
+
+        # Resolve path
+        if not os.path.isabs(prod_weights):
+            resolved_weights_path = REPO_ROOT / prod_weights
+        else:
+            resolved_weights_path = Path(prod_weights)
+
+        # Fail fast if it does not exist
+        if not resolved_weights_path.exists():
+            print("ERROR: Production model not found\n")
+            print("Configured:")
+            print(prod_weights)
+            print("\nPlease update MODEL_SELECT or restore the model file.")
+            sys.exit(1)
+
+        # Print startup banner
+        device_str = "CUDA" if use_cuda else "CPU"
+        fp16_str = "Enabled" if YOLO_ENABLE_FP16 else "Disabled"
+
+        print("==========================================")
+        print("SecureVU Detection Configuration")
+        print("==========================================")
+        print(f"MODEL_SELECT      : {MODEL_SELECT}")
+        print(f"Mode              : {config['mode']}")
+        print(f"Variant           : {config['variant']}")
+        print(f"Weights           : {config['weights']}")
+        print(f"Specialized       : {config['specialized']}")
+        print(f"Face Recognition  : {config['face_rec']}")
+        print(f"Open World        : {config['open_world']}")
+        print(f"Device            : {device_str}")
+        print(f"FP16              : {fp16_str}")
+        print("==========================================")
+
+        weights_path = str(resolved_weights_path)
     else:
         weights_path = os.environ.get(
             "YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
@@ -1297,25 +1383,25 @@ else:
     print(f"ℹ️ General YOLO model not loaded (MODEL_SELECT={MODEL_SELECT})")
 
 # --- Face Detection (yolov8n-face) ---
-if MODEL_SELECT in (2, 5, 7):
+if MODEL_SELECT in (2, 5, 7, 11, 12):
     face_det_model = _load_yolo_model(
         str(REPO_ROOT / "models" / "face" / "yolov8n-face.pt"), "YOLO-Face"
     )
 
 # --- Fire & Smoke ---
-if MODEL_SELECT in (3, 5, 7):
+if MODEL_SELECT in (3, 5, 7, 11, 12):
     fire_model = _load_yolo_model(
         str(REPO_ROOT / "models" / "fire" / "fire_smoke.pt"), "Fire-Smoke"
     )
 
 # --- License Plate Detection (LPD) ---
-if MODEL_SELECT in (4, 5, 7):
+if MODEL_SELECT in (4, 5, 7, 11, 12):
     lpd_model = _load_yolo_model(
         str(REPO_ROOT / "models" / "lpd" / "model.pt"), "LPD"
     )
 
-# --- Production/Full mode (6, 7): InsightFace face recognition ---
-if MODEL_SELECT in (6, 7):
+# --- Production/Full mode (6, 7, 9, 10, 11, 12): InsightFace face recognition ---
+if MODEL_SELECT in (6, 7, 9, 10, 11, 12):
     FACE_ENABLE = True
     print(f"✅ Full/Production mode: InsightFace recognition enabled (MODEL_SELECT={MODEL_SELECT})")
 
@@ -3718,25 +3804,25 @@ def process_frame(
 
     with torch.inference_mode():
         with torch.cuda.amp.autocast(enabled=amp_enabled):
-            # Face detection model (MODEL_SELECT 2, 5, 7)
+            # Face detection model (MODEL_SELECT 2, 5, 7, 11, 12)
             if face_det_model is not None:
-                _run_face = (MODEL_SELECT in (2, 7)) or (cam_frame_counter % max(1, FACE_DET_EVERY_N_FRAMES) == 0)
+                _run_face = (MODEL_SELECT in (2, 7, 11, 12)) or (cam_frame_counter % max(1, FACE_DET_EVERY_N_FRAMES) == 0)
                 if _run_face:
                     raw_dets.extend(_run_specialized_model(
                         face_det_model, small, "face_det", _spec_scale_x, _spec_scale_y
                     ))
 
-            # Fire/smoke model (MODEL_SELECT 3, 5, 7)
+            # Fire/smoke model (MODEL_SELECT 3, 5, 7, 11, 12)
             if fire_model is not None:
-                _run_fire = (MODEL_SELECT in (3, 7)) or (cam_frame_counter % max(1, FIRE_EVERY_N_FRAMES) == 0)
+                _run_fire = (MODEL_SELECT in (3, 7, 11, 12)) or (cam_frame_counter % max(1, FIRE_EVERY_N_FRAMES) == 0)
                 if _run_fire:
                     raw_dets.extend(_run_specialized_model(
                         fire_model, small, "fire", _spec_scale_x, _spec_scale_y
                     ))
 
-            # License plate model (MODEL_SELECT 4, 5, 7)
+            # License plate model (MODEL_SELECT 4, 5, 7, 11, 12)
             if lpd_model is not None:
-                _run_lpd = (MODEL_SELECT in (4, 7)) or (cam_frame_counter % max(1, LPD_EVERY_N_FRAMES) == 0)
+                _run_lpd = (MODEL_SELECT in (4, 7, 11, 12)) or (cam_frame_counter % max(1, LPD_EVERY_N_FRAMES) == 0)
                 if _run_lpd:
                     raw_dets.extend(_run_specialized_model(
                         lpd_model, small, "lpd", _spec_scale_x, _spec_scale_y
