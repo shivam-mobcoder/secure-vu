@@ -1252,6 +1252,8 @@ face_det_model = None   # YOLO face detector (yolov8n-face.pt)
 fire_model = None        # Fire/smoke detector (fire_smoke.pt)
 lpd_model = None         # License plate detector (model.pt)
 yolo_model = None        # General YOLO object detector
+CURRENT_YOLO_RUNTIME = "pytorch"
+
 
 
 def _load_yolo_model(path, label="YOLO"):
@@ -1262,7 +1264,11 @@ def _load_yolo_model(path, label="YOLO"):
         print(f"⚠️ {label} weights not found at {path}, skipping")
         return None
     print(f"🔁 Loading {label} weights from: {path}")
+    is_engine = path.endswith(".engine")
     model = YOLO(path)
+    if is_engine:
+        print(f"⚡ {label} loaded as TensorRT engine")
+        return model
     model.to(device)
     if use_cuda and YOLO_ENABLE_FUSE:
         try:
@@ -1278,6 +1284,7 @@ def _load_yolo_model(path, label="YOLO"):
             print(f"⚠️ {label} FP16 skipped: {e}")
     print(f"✅ {label} loaded on {model.device}")
     return model
+
 
 
 _PRODUCTION_CONFIGS = {
@@ -1350,7 +1357,6 @@ if _yolo_general_needed:
         # Fail fast if it does not exist
         if not resolved_weights_path.exists():
             print("ERROR: Production model not found\n")
-            print("Configured:")
             print(prod_weights)
             print("\nPlease update MODEL_SELECT or restore the model file.")
             sys.exit(1)
@@ -1378,7 +1384,50 @@ if _yolo_general_needed:
         weights_path = os.environ.get(
             "YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
         )
-    yolo_model = _load_yolo_model(weights_path, "YOLO-General")
+
+    # TensorRT vs PyTorch runtime selection and automatic fallback
+    base_weights_path = weights_path
+    model_runtime = os.environ.get("MODEL_RUNTIME", "pytorch").lower()
+    yolo_model = None
+
+    if model_runtime == "tensorrt":
+        engine_path = Path(base_weights_path).with_suffix(".engine")
+        if engine_path.exists():
+            print(f"⚡ TensorRT mode selected. Trying engine: {engine_path}")
+            try:
+                weights_path = str(engine_path)
+                yolo_model = _load_yolo_model(weights_path, "YOLO-General")
+                if yolo_model is not None:
+                    CURRENT_YOLO_RUNTIME = "tensorrt"
+            except Exception as e:
+                print(f"⚠️ WARNING: Failed to load TensorRT engine {engine_path.name}: {e}")
+                print("Falling back to PyTorch (.pt)...")
+                yolo_model = None
+        else:
+            print(f"⚠️ WARNING: TensorRT mode selected, but engine {engine_path.name} not found. Falling back to PyTorch.")
+
+    if yolo_model is None:
+        weights_path = base_weights_path
+        yolo_model = _load_yolo_model(weights_path, "YOLO-General")
+        CURRENT_YOLO_RUNTIME = "pytorch"
+
+    # Print SecureVU Runtime banner
+    device_str = "CUDA" if use_cuda else "CPU"
+    banner_runtime = "TensorRT" if CURRENT_YOLO_RUNTIME == "tensorrt" else "PyTorch"
+    banner_precision = "FP16" if (CURRENT_YOLO_RUNTIME == "tensorrt" or YOLO_ENABLE_FP16) else "FP32"
+    banner_model_name = Path(weights_path).stem
+    banner_engine = os.path.basename(weights_path) if CURRENT_YOLO_RUNTIME == "tensorrt" else "N/A"
+
+    print("==========================================")
+    print("SecureVU Runtime")
+    print("==========================================")
+    print(f"Model           : {banner_model_name}")
+    print(f"Runtime         : {banner_runtime}")
+    print(f"Precision       : {banner_precision}")
+    print(f"Device          : {device_str}")
+    if banner_runtime == "TensorRT":
+        print(f"Engine          : {banner_engine}")
+    print("==========================================")
 else:
     print(f"ℹ️ General YOLO model not loaded (MODEL_SELECT={MODEL_SELECT})")
 
@@ -6088,7 +6137,7 @@ def main():
                         hw_summary = f" | HW: cpu={hw['cpu_percent']}% ram={hw['ram_percent']}% gpu={hw['gpu_util']} gmem={hw['gpu_mem']}"
 
                         logger.info(
-                            f"📈 Stats (last {int(INTERVAL)}s): detections/s={detections_per_sec:.2f}, outgoing_fps={outgoing_fps:.2f}{perf_summary}{hw_summary}"
+                            f"📈 Stats (last {int(INTERVAL)}s) [YOLO: {CURRENT_YOLO_RUNTIME.upper()}]: detections/s={detections_per_sec:.2f}, outgoing_fps={outgoing_fps:.2f}{perf_summary}{hw_summary}"
                         )
                     except Exception as e:
                         logger.warning(f"Stats reporter error: {e}")
