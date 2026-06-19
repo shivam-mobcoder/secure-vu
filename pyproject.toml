@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "torch>=2.10.0",
     "ultralytics>=8.4.14",
+    "lap>=0.5.12",
     "fastapi[standard]>=0.131.0",
     "supervision>=0.27.0.post2",
 ]
