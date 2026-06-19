@@ -1367,6 +1367,7 @@ _PRODUCTION_CONFIGS = {
 
 # --- Determine which YOLO weights to use for the general model ---
 _yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7, 8, 9, 10, 11, 12)
+ACTIVE_YOLO_WEIGHTS_PATH = None
 if _yolo_general_needed:
     if MODEL_SELECT == 8:
         weights_path = str(REPO_ROOT / "models" / "yolo" / "yolov8s-worldv2.pt")
@@ -1410,6 +1411,7 @@ if _yolo_general_needed:
         weights_path = os.environ.get(
             "YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
         )
+    ACTIVE_YOLO_WEIGHTS_PATH = weights_path
 
     # TensorRT vs PyTorch runtime selection and automatic fallback
     base_weights_path = weights_path
@@ -1491,6 +1493,17 @@ if fire_model is not None:
 if lpd_model is not None:
     _loaded.append("LPD")
 print(f"📦 Loaded models: {', '.join(_loaded) if _loaded else 'NONE'}")
+
+try:
+    from app import ml_tracking
+
+    ml_tracking.set_runtime_context(
+        yolo_weights_path=ACTIVE_YOLO_WEIGHTS_PATH,
+        yolo_runtime=CURRENT_YOLO_RUNTIME,
+        model_select=MODEL_SELECT,
+    )
+except Exception:
+    ml_tracking = None  # type: ignore
 
 # Test primary YOLO inference
 _primary_model = yolo_model or face_det_model or fire_model or lpd_model
@@ -1610,6 +1623,23 @@ try:
 except Exception as e:
     logger.error("❌ FaceID disabled: %s", e)
     faceid = None
+
+
+def _reload_face_db_and_track(source: str = "face_db") -> None:
+    if not faceid:
+        return
+    faceid.load()
+    try:
+        from app import ml_tracking
+
+        ml_tracking.schedule_tracking(
+            ml_tracking.log_config_change,
+            source=source,
+            changed_keys=["face_db.npz"],
+            artifact_paths=[FACE_DB_FILE],
+        )
+    except Exception:
+        pass
 
 
 # --------------------------------------------------
@@ -1750,10 +1780,25 @@ def _load_rules_file() -> dict:
     return {"version": 1, "cameras": {}}
 
 
-def _save_rules_file(data: dict) -> None:
+def _save_rules_file(data: dict, camera_id=None) -> None:
     try:
         RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
         RULES_FILE.write_text(json.dumps(data, indent=2))
+        try:
+            from app import ml_tracking
+
+            extra = {}
+            if camera_id is not None:
+                extra["camera_id"] = _camera_key(camera_id)
+            ml_tracking.schedule_tracking(
+                ml_tracking.log_config_change,
+                source="camera_rules",
+                changed_keys=["camera_rules.json"],
+                extra_params=extra,
+                artifact_paths=[RULES_FILE],
+            )
+        except Exception:
+            pass
     except Exception as e:
         logger.warning(f"Failed to save camera rules: {e}")
 
@@ -1908,7 +1953,7 @@ def _set_camera_rules(camera_id, rules: dict) -> dict:
         data = _load_rules_file()
         data.setdefault("cameras", {})
         data["cameras"][cam_key] = normalized
-        _save_rules_file(data)
+        _save_rules_file(data, camera_id=camera_id)
     return normalized
 
 
@@ -2664,6 +2709,17 @@ def _set_event_clips_enabled(enabled: bool, *, persist: bool = True) -> bool:
             pass
     if persist:
         _persist_runtime_flags()
+    try:
+        from app import ml_tracking
+
+        ml_tracking.schedule_tracking(
+            ml_tracking.log_config_change,
+            source="event_clips_toggle",
+            changed_keys=["event_clip_enable"],
+            extra_params={"event_clip_enable": bool(EVENT_CLIP_ENABLE)},
+        )
+    except Exception:
+        pass
     return bool(EVENT_CLIP_ENABLE)
 
 
@@ -5329,7 +5385,7 @@ async def face_enroll(request):
 
         success, message = enroll_face(name, frames)
         if success and faceid:
-            faceid.load()  # Reload database with new embeddings
+            _reload_face_db_and_track("face_enroll")
             send_enrollment_alert(f"Database reloaded - {name} ready for recognition")
 
         return web.json_response(
@@ -5441,7 +5497,7 @@ async def face_enroll_frames(request):
     # Enroll into client-scoped DB
     success, message = enroll_face(name, frames, client_id=client_id)
     if success and faceid:
-        faceid.load()
+        _reload_face_db_and_track("face_enroll_frames")
         send_enrollment_alert(f"[API] {name} enrolled via dashboard")
 
     return web.json_response(
@@ -5555,7 +5611,7 @@ async def face_delete(request):
         np.savez(db_path, embeddings=new_embeddings, labels=new_labels)
 
     if faceid:
-        faceid.load()
+        _reload_face_db_and_track("face_delete")
 
     # Remove raw images for this client+person
     import shutil
@@ -6430,6 +6486,17 @@ def main():
         app["db_persist_processor"] = asyncio.create_task(persist_db_queue())
         logger.info("✅ Alert queue processor started")
         try:
+            from app import ml_tracking
+
+            async def _log_mlflow_deployment():
+                await asyncio.to_thread(
+                    ml_tracking.log_deployment_run, "server_startup"
+                )
+
+            app["mlflow_deployment"] = asyncio.create_task(_log_mlflow_deployment())
+        except Exception as e:
+            logger.debug("MLflow deployment tracking skipped: %s", e)
+        try:
             _start_background_cctv_analytics()
         except Exception as e:
             logger.warning(f"Could not start background CCTV analytics: {e}")
@@ -6509,6 +6576,12 @@ def main():
             app["db_persist_processor"].cancel()
             try:
                 await app["db_persist_processor"]
+            except asyncio.CancelledError:
+                pass
+        if "mlflow_deployment" in app:
+            app["mlflow_deployment"].cancel()
+            try:
+                await app["mlflow_deployment"]
             except asyncio.CancelledError:
                 pass
         # Cancel stats reporter

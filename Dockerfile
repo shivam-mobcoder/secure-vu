@@ -32,7 +32,7 @@ COPY pyproject.toml .
 
 # Install dependencies using UV
 # We use --system to install into the system site-packages of the container
-RUN uv sync --frozen || uv sync
+RUN uv sync --frozen --group mlops || uv sync --group mlops
 
 # Copy the rest of the application code
 COPY . .

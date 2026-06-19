@@ -29,6 +29,9 @@ dev = [
     "ruff>=0.15.2",
     "vulture>=2.14",
 ]
+mlops = [
+    "mlflow>=2.20.0",
+]
 
 [tool.vulture]
 exclude = [".venv", "node_modules", "frontend"]

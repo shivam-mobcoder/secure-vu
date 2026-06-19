@@ -13,9 +13,25 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Automatically run our init scripts on first boot
       - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql
       - ./migrations/002_poc.sql:/docker-entrypoint-initdb.d/002_poc.sql
+    networks:
+      - cctv_network
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.20.0
+    container_name: cctv_mlflow
+    restart: always
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri file:///mlflow/mlruns
+      --default-artifact-root file:///mlflow/mlruns
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/mlflow/mlruns
     networks:
       - cctv_network
 
@@ -25,6 +41,7 @@ services:
     restart: always
     depends_on:
       - db
+      - mlflow
     environment:
       - DB_HOST=db
       - DB_USER=${DB_USER:-cctv_user}
@@ -36,6 +53,11 @@ services:
       - CONTINUOUS_RECORDING_ENABLE=1
       - MOTION_ENABLE=1
       - LINGER_SECONDS=30
+      - MLFLOW_ENABLE=${MLFLOW_ENABLE:-1}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_EXPERIMENT_TRAINING=securevu-training
+      - MLFLOW_EXPERIMENT_DEPLOYMENT=securevu-deployment
+      - MLFLOW_MODEL_NAME=securevu-person-detector
     ports:
       - "8000:8000"
     volumes:
@@ -43,6 +65,7 @@ services:
       - ./recordings:/app/recordings
       - ./tracking:/app/tracking
       - ./models:/app/models
+      - ./mlruns:/mlflow/mlruns
     networks:
       - cctv_network
 

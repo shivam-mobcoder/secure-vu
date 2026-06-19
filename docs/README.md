@@ -34,6 +34,7 @@ Project guides, deployment notes, model reports, and planning documents.
 |----------|-------------|
 | [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | Chronological development notes |
 | [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | Frozen 12-minute POC demonstration script |
+| [MLFLOW.md](MLFLOW.md) | MLflow experiment and configuration tracking |
 
 ## Architecture (POC week 1)
 
