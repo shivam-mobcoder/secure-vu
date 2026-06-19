@@ -1,6 +1,30 @@
 # Development & Optimization Log
 
-This file is for the team to track major code changes, performance optimizations, and technical decisions. Please add new entries at the top with the date, the programmer's name, and a brief description of what was changed and why.
+This file tracks major code changes, performance optimizations, and technical decisions. Add new entries at the top.
+
+---
+
+## [2026-06-19] POC branch + MLflow tracking
+
+**Branch:** `POC`
+
+### POC features (week 1)
+- Loitering and motion detection alerts in `app/server.py`
+- Postgres alert persistence (`/api/alerts`) and continuous recording (`/api/recordings`, `app/recording.py`)
+- Camera health API; AdminFeed alert hydrate + playback UI
+- Migration `migrations/002_poc.sql`
+- Demo config: `docs/DEMO_SCRIPT.md`, tuned `config/camera_rules.json`
+
+### MLflow (config lineage)
+- `app/ml_tracking.py` — deployment snapshots on server start and config changes
+- Docker Compose `mlflow` service; `scripts/benchmark_config.py`
+- `scripts/train_yolo.py` logs training runs + model registry
+- Docs: `docs/MLFLOW.md`; deps: `requirements.txt`, `uv sync --group mlops`
+
+### Docs / packaging
+- Root `README.md` updated for POC quick start
+- `requirements.txt` generated via `uv export --group mlops`
+- Documentation audit: all guides aligned with POC stack (migrations, MLflow, APIs, `.env` names)
 
 ---
 

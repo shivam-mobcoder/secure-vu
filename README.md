@@ -70,7 +70,7 @@ secure-vu/
 | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | 12-minute POC demo script |
 | [docs/MLFLOW.md](docs/MLFLOW.md) | Experiment and config tracking |
 | [docs/CCTV_INTEGRATION_GUIDE.md](docs/CCTV_INTEGRATION_GUIDE.md) | RTSP camera setup |
-| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Full deployment guide |
+| [docs/DEPLOYMENT_GUIDE_SUMMARY.md](docs/DEPLOYMENT_GUIDE_SUMMARY.md) | Deployment quick reference |
 
 ---
 

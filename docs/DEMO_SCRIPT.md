@@ -13,12 +13,14 @@
 
 ## Pre-demo checklist
 
-- [ ] `.env` copied from `.env.example` with RTSP URLs for cams 1–4
+- [ ] On branch `POC`; `.env` copied from `.env.example` with `RTSP_URL_1`–`RTSP_URL_4`
+- [ ] `migrations/002_poc.sql` applied (alerts + recording tables)
 - [ ] `models/yolo/secure_cv_best.pt` and `pre_trained/insightface/` present
 - [ ] `certs/cert.pem` and `certs/key.pem` generated
 - [ ] Two faces pre-enrolled (e.g. `Demo_User_A`, `Demo_User_B`)
-- [ ] Server started: `uv run python app/server.py`
 - [ ] Frontend built: `cd frontend/superadmin-react && npm run build`
+- [ ] Stack running: `docker compose up` **or** `uv run python app/server.py`
+- [ ] Optional: MLflow UI at `http://localhost:5000` (`MLFLOW_ENABLE=1`)
 - [ ] Backup MP4 clips in `event_clips/` if RTSP may fail
 
 ## Demo flow (~12 minutes)

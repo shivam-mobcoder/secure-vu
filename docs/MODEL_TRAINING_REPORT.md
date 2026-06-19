@@ -61,7 +61,7 @@ Different choices in model selection and resolution significantly impact "Cost" 
 
 #### Choice C: Face Recognition Frequency (`FACE_EVERY_N_FRAMES`)
 - **N=1**: Accurate but consumes ~10% more GPU per person.
-- **N=5 (Current)**: Amortizes cost to **0.4 ms/frame** without losing track of individuals.
+- **N=3 (POC default)**: Balance of responsiveness and GPU load per `.env.example`.
 
 ---
 
@@ -86,7 +86,7 @@ Modern face recognition is not a single "match" step. It requires a chain of ope
 
 #### 4. Feature Extraction (`w600k_r50`)
 - **What it does**: The core **ArcFace** model. It takes the aligned face image and compresses it into a **512-dimensional mathematical vector** (an "embedding").
-- **How it works**: This vector is like a digital fingerprint. We compare this vector against your database using "Cosine Similarity." If the mathematical distance is small enough (current threshold: **0.45**), a match is confirmed.
+- **How it works**: This vector is like a digital fingerprint. We compare this vector against your database using "Cosine Similarity." If the mathematical distance is small enough (POC default threshold: **0.25** via `FACE_RECOGNITION_THRESHOLD`), a match is confirmed.
 
 #### 5. Attribute Analysis (`genderage`)
 - **What it does**: Predicts the person's age and gender.
@@ -99,10 +99,21 @@ Modern face recognition is not a single "match" step. It requires a chain of ope
 4. **1k3d68** checks if the head is "real/live" via 3D pose variance.
 5. **w600k_r50** generates the final fingerprint for identity matching.
 
+---
+
+## 6. Retraining & MLflow (POC branch)
+
+Fine-tune with:
+
+```bash
+uv run --group mlops scripts/train_yolo.py
+```
+
+This script trains on `datasets/secure_cv_v4/data.yaml`, copies best weights to `models/yolo/secure_cv_best.pt`, logs metrics to MLflow (`securevu-training`), and registers `securevu-person-detector` when MLflow is reachable. See [MLFLOW.md](MLFLOW.md).
 
 ---
 
-## 6. Appendix: Why YOLO instead of ResNet?
+## 7. Appendix: Why YOLO instead of ResNet?
 
 A common question is why the system uses the "heavy" YOLOv11m model instead of a classic architecture like **ResNet**.
 
@@ -128,7 +139,7 @@ A common question is why the system uses the "heavy" YOLOv11m model instead of a
 
 ---
 
-## 7. Hardware Utilization Summary
+## 8. Hardware Utilization Summary
 Based on the live measurements from the RTX 2080 Ti:
 
 - **GPU Utilization**: 37.5% (1 Camera)

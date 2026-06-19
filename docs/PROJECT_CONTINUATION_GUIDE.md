@@ -1,50 +1,72 @@
 # 🚀 Project Continuation & Migration Guide
 
-Use this guide to set up the project on a different laptop while preserving all progress.
+Use this guide to set up the project on a different machine while preserving progress.
+
+**Active branch:** `POC`
 
 ## 💾 Files You MUST Move Manually
-These files are **NOT** in Git because they are too large or sensitive. You must copy them via a USB drive or cloud storage:
 
-1.  **`.env`**: Your local configuration and secrets.
-2.  **`models/`**: All pre-trained and custom YOLO weights.
-3.  **`pre_trained/`**: InsightFace model packs (buffalo_l).
-4.  **`datasets/`**: (If needed) Your captured training images. **Note**: You have created `datasets_backup.zip` (2.2GB) which is ready for Google Drive upload.
-5.  **`certs/`**: Your self-signed TLS certificates for HTTPS/WebRTC.
+These are **not** in Git (too large or sensitive). Copy via USB or secure storage:
+
+1. **`.env`** — secrets and RTSP URLs (copy from `.env.example`)
+2. **`models/`** — YOLO weights (`secure_cv_best.pt`) and ArcFace `face_db/`
+3. **`pre_trained/`** — InsightFace buffalo_l pack
+4. **`datasets/`** — training images (if retraining)
+5. **`certs/`** — TLS certs for HTTPS/WebRTC
+6. **`recordings/`** — continuous recording segments (optional)
+7. **`mlruns/`** — MLflow experiment data (optional)
 
 ## 🛠️ Step-by-Step Setup on New Machine
 
 ### 1. Clone the Repository
+
 ```bash
 git clone <repo-url>
 cd secure-vu
-git checkout dev  # or mob-sr
+git checkout POC
 ```
 
 ### 2. Restore Manual Files
-Paste the `models/`, `pre_trained/`, `.env`, and `certs/` folders into the root directory.
+
+Place `models/`, `pre_trained/`, `.env`, and `certs/` in the repo root.
 
 ### 3. Install Dependencies
-Ensure you have **Python 3.10** and **uv** installed.
+
+Requires **Python 3.10.x** and **uv** (or pip).
+
 ```bash
-uv sync
+# Recommended (includes MLflow)
+uv sync --group mlops
+
+# Or pip
+python3.10 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 ```
+
+> On macOS, `onnxruntime-gpu` may not install — use Docker/Linux for GPU inference.
 
 ### 4. Setup Database
-If you want to keep your existing data (users, cameras, history), you should export it from the old machine:
-**Old Machine:**
+
+**Keep existing data** (export from old machine):
+
 ```bash
 pg_dump -U cctv_user cctv_platform > db_backup.sql
-```
-**New Machine:**
-```bash
+# New machine:
 psql -U cctv_user -d cctv_platform -f db_backup.sql
 ```
-Otherwise, run the fresh migration:
+
+**Fresh install:**
+
 ```bash
+docker compose up -d db
 psql -U cctv_user -d cctv_platform -f migrations/001_init.sql
+psql -U cctv_user -d cctv_platform -f migrations/002_poc.sql
 ```
 
+Docker Compose runs both migrations on **first** Postgres boot only. Existing volumes need manual `002_poc.sql`.
+
 ### 5. Build Frontend
+
 ```bash
 cd frontend/superadmin-react
 npm install
@@ -53,14 +75,31 @@ cd ../..
 ```
 
 ### 6. Run
+
+**Docker (full stack — Postgres + MLflow + app):**
+
+```bash
+docker compose up --build
+```
+
+**Local dev:**
+
 ```bash
 uv run python app/server.py
 ```
 
-https://drive.google.com/drive/u/0/folders/1InDJdI2GihUHeM50pL2fC3B_eKr1-KhR
+| URL | Purpose |
+|-----|---------|
+| `https://localhost:8000` | App |
+| `http://localhost:5000` | MLflow UI |
 
 ## 🔍 Troubleshooting Checklist
-- [ ] **Python Version**: Must be 3.10.x.
-- [ ] **CUDA**: Ensure NVIDIA drivers and Toolkit are installed if using GPU.
-- [ ] **Permissions**: Ensure user has read/write access to `event_clips/` and `models/`.
-- [ ] **Certs**: If browser gives "Insecure" error, you may need to regenerate certs or ignore the warning for local dev.
+
+- [ ] Python **3.10.x** (not 3.11+)
+- [ ] NVIDIA drivers + CUDA if using GPU on Linux
+- [ ] Write access to `event_clips/`, `recordings/`, `tracking/`
+- [ ] `002_poc.sql` applied if alert history / playback APIs fail
+- [ ] Frontend rebuilt after pulling UI changes
+- [ ] `MLFLOW_ENABLE=0` if MLflow server is not running (optional)
+
+See also [MLFLOW.md](MLFLOW.md) and [DEMO_SCRIPT.md](DEMO_SCRIPT.md).

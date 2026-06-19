@@ -4,6 +4,8 @@
 > **Test**: 1 CCTV camera (RTSP), Face Recognition enabled  
 > **Duration**: ~2 minutes sustained load, 20 hardware samples @ 3s interval
 
+> **POC branch note:** This report reflects a measured run with `FACE_EVERY_N_FRAMES=5`. The current POC profile in [`.env.example`](../.env.example) uses **`FACE_EVERY_N_FRAMES=3`** and **`FACE_RECOGNITION_THRESHOLD=0.25`**. Treat latency and GPU figures as directional; re-benchmark after changing env.
+
 ---
 
 ## Page 1 — Live Measured Stats (1 Camera + Face Recognition)

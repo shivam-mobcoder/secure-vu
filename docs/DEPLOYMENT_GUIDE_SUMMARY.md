@@ -4,6 +4,24 @@
 
 ---
 
+## POC branch — current repo stack
+
+The active **`POC`** branch ships a working Docker Compose stack:
+
+| Service | Port | Role |
+|---------|------|------|
+| `db` | 5432 | PostgreSQL 15 (`001_init.sql` + `002_poc.sql`) |
+| `mlflow` | 5000 | Experiment and config tracking |
+| `app` | 8000 | aiohttp server (WebRTC, YOLO, APIs) |
+
+**Key APIs:** `/api/alerts`, `/api/recordings`, `/api/cameras/health`  
+**Admin UI:** live feed, playback, face enrollment  
+**Install:** `docker compose up --build` or see [root README](../README.md)
+
+The sections below describe **general sizing and future production** deployments (multi-site, Redis, NGINX, Kubernetes).
+
+---
+
 ## What It Is
 
 Secure View is a self-hosted, AI-powered CCTV analytics platform. All processing — video, AI inference, storage — happens on the client's own hardware. No cloud, no data egress.
@@ -222,4 +240,4 @@ All AI models run locally. No video or metadata leaves the premises.
 
 ---
 
-*For full technical detail — sizing formulas, GPU scaling factors, HA architecture, Kubernetes specs, security hardening — refer to the complete [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).*
+*This summary covers POC Docker Compose (`db` + `mlflow` + `app`) and general deployment sizing. Operational setup is in the [root README](../README.md).*

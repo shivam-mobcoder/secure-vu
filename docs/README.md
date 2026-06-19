@@ -1,15 +1,21 @@
 # SecureVu Documentation
 
-Project guides, deployment notes, model reports, and planning documents.
+Operational guides for the **POC** branch. See [root README](../README.md) for quick start, `requirements.txt`, and Docker Compose with MLflow.
 
-## Setup & operations
+## POC & operations (start here)
 
 | Document | Description |
 |----------|-------------|
-| [PROJECT_CONTINUATION_GUIDE.md](PROJECT_CONTINUATION_GUIDE.md) | Migrate the project to a new machine |
+| [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | Frozen 12-minute POC demonstration script |
+| [MLFLOW.md](MLFLOW.md) | MLflow experiment and configuration tracking |
 | [CCTV_INTEGRATION_GUIDE.md](CCTV_INTEGRATION_GUIDE.md) | RTSP camera integration |
-| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Full deployment guide |
-| [DEPLOYMENT_GUIDE_SUMMARY.md](DEPLOYMENT_GUIDE_SUMMARY.md) | Deployment quick reference |
+| [PROJECT_CONTINUATION_GUIDE.md](PROJECT_CONTINUATION_GUIDE.md) | Migrate the project to a new machine |
+
+## Setup & deployment
+
+| Document | Description |
+|----------|-------------|
+| [DEPLOYMENT_GUIDE_SUMMARY.md](DEPLOYMENT_GUIDE_SUMMARY.md) | Deployment quick reference (POC stack + sizing) |
 
 ## Models & performance
 
@@ -17,25 +23,31 @@ Project guides, deployment notes, model reports, and planning documents.
 |----------|-------------|
 | [MODEL_TRAINING_REPORT.md](MODEL_TRAINING_REPORT.md) | YOLO training parameters and results |
 | [MODEL_STATS_REPORT.md](MODEL_STATS_REPORT.md) | Runtime resource consumption benchmarks |
-| [KT_SecureVu_Pranaya_Mathur.md](KT_SecureVu_Pranaya_Mathur.md) | Model selection knowledge transfer |
 
-## Planning & product
-
-| Document | Description |
-|----------|-------------|
-| [SECUREVU_OPTIMIZATION_PLAN.md](SECUREVU_OPTIMIZATION_PLAN.md) | Performance optimization plan |
-| [SECUREVU_REFINEMENT_PLAN.md](SECUREVU_REFINEMENT_PLAN.md) | Product refinement plan |
-| [CPU_ONLY_PLAN.md](CPU_ONLY_PLAN.md) | CPU-only deployment notes |
-| [CLIENT_ONPREM_LICENSING_MODEL.md](CLIENT_ONPREM_LICENSING_MODEL.md) | On-prem licensing model |
+Training with MLflow: `uv run --group mlops scripts/train_yolo.py` (see [MLFLOW.md](MLFLOW.md)).
 
 ## Development log
 
 | Document | Description |
 |----------|-------------|
 | [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | Chronological development notes |
-| [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | Frozen 12-minute POC demonstration script |
-| [MLFLOW.md](MLFLOW.md) | MLflow experiment and configuration tracking |
 
-## Architecture (POC week 1)
+## Architecture (POC branch)
 
-Week 1 delivers a **feature-complete monolith**: live WebRTC, YOLO + InsightFace analytics, rules engine, event clips, alert persistence, and continuous recording segments — all in `app/server.py`. Week 2+ may split media ingest and analytics into separate services; that refactor is explicitly out of scope for the POC branch.
+Week 1 delivers a **feature-complete monolith** in `app/server.py`:
+
+| Capability | Status |
+|------------|--------|
+| Live WebRTC (2–4 cams) | Done |
+| YOLO + ByteTrack + InsightFace | Done |
+| Rules: zones, lines, crowd, parking, loitering, motion | Done |
+| Event clips | Done |
+| Alert Postgres persistence (`/api/alerts`) | Done |
+| Continuous recording segments (`/api/recordings`) | Done |
+| Camera health API | Done |
+| Admin UI: live feed, alerts hydrate, playback | Done |
+| MLflow config/training tracking | Done |
+
+**Migrations:** `001_init.sql` (core schema) + `002_poc.sql` (`alerts`, `recording_segments`).
+
+**Dependencies:** `pyproject.toml` + `uv.lock`; pip users: `requirements.txt` (from `uv export --group mlops`).
