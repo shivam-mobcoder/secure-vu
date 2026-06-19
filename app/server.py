@@ -4774,6 +4774,21 @@ class SharedServerCamera:
         if not self._rtsp_url:
             return None
         cap = _open_rtsp(self._rtsp_url)
+        if cap is None and os.getenv("DEV_WEBCAM_FALLBACK", "0").strip() == "1":
+            # Local dev when RTSP NVR is on another network (e.g. 192.168.2.x).
+            try:
+                cam_idx = max(0, int(self._camera_id or 1) - 1)
+            except Exception:
+                cam_idx = 0
+            if cam_idx == 0:
+                cap = cv2.VideoCapture(0)
+                if cap is not None and cap.isOpened():
+                    logger.warning(
+                        f"⚠️ RTSP unavailable for camera {self._camera_id}; "
+                        "using DEV_WEBCAM_FALLBACK (local webcam)"
+                    )
+                else:
+                    cap = None
         if cap is None:
             return None
         ok, _ = cap.read()
