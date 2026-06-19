@@ -19,7 +19,7 @@
         }
       ],
       "max_people": {
-        "enabled": true,
+        "enabled": false,
         "value": 3
       },
       "roi_intrusion": {
@@ -116,8 +116,8 @@
         }
       ],
       "max_people": {
-        "enabled": false,
-        "value": 5
+        "enabled": true,
+        "value": 2
       },
       "roi_intrusion": {
         "enabled": true,
@@ -222,8 +222,16 @@
         ]
       },
       "virtual_lines": {
-        "enabled": false,
-        "lines": []
+        "enabled": true,
+        "lines": [
+          {
+            "id": "DemoLine",
+            "p1": [0.1, 0.5],
+            "p2": [0.9, 0.5],
+            "direction": "both",
+            "classes": ["person"]
+          }
+        ]
       },
       "unknown_person": {
         "enabled": false
@@ -266,10 +274,10 @@
         "value": 5
       },
       "roi_intrusion": {
-        "enabled": false,
+        "enabled": true,
         "zones": [
           {
-            "id": "Zone 1",
+            "id": "LingerZone",
             "points": [
               [
                 0.8783185840707964,
@@ -313,8 +321,20 @@
         ]
       },
       "parking_rules": {
-        "enabled": false,
-        "zones": []
+        "enabled": true,
+        "zones": [
+          {
+            "id": "LingerZone",
+            "points": [
+              [0.8783185840707964, 0.5647058823529412],
+              [0.918141592920354, 0.6607843137254902],
+              [0.8329646017699115, 0.788235294117647],
+              [0.7831858407079646, 0.7549019607843137]
+            ],
+            "classes": ["person"],
+            "max_seconds": 30
+          }
+        ]
       }
     }
   }

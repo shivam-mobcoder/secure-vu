@@ -15,6 +15,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       # Automatically run our init scripts on first boot
       - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql
+      - ./migrations/002_poc.sql:/docker-entrypoint-initdb.d/002_poc.sql
     networks:
       - cctv_network
 
@@ -31,10 +32,15 @@ services:
       - DB_NAME=${DB_NAME:-cctv_platform}
       - PORT=8000
       - EVENT_CLIP_DIR=/app/event_clips
+      - RECORDINGS_DIR=/app/recordings
+      - CONTINUOUS_RECORDING_ENABLE=1
+      - MOTION_ENABLE=1
+      - LINGER_SECONDS=30
     ports:
       - "8000:8000"
     volumes:
       - ./event_clips:/app/event_clips
+      - ./recordings:/app/recordings
       - ./tracking:/app/tracking
       - ./models:/app/models
     networks:

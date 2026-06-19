@@ -5,6 +5,7 @@ import AuthPage from "./pages/AuthPage";
 import RecognitionLogs from "./features/face-recognition/pages/RecognitionLogs";
 import FaceEnrollment from "./features/face-recognition/pages/FaceEnrollment";
 import AdminFeed from "./features/face-recognition/pages/AdminFeed";
+import Playback from "./features/face-recognition/pages/Playback";
 import SelfEnrollment from "./features/face-recognition/pages/SelfEnrollment";
 
 import SubscriptionManagement from "./pages/SubscriptionManagement";
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="face/enroll" element={<FaceEnrollment />} />
           <Route path="face/logs" element={<RecognitionLogs />} />
           <Route path="live-feed" element={<AdminFeed />} />
+          <Route path="playback" element={<Playback />} />
           <Route path="users" element={<UserManagement />} />
         </Route>
       </Route>

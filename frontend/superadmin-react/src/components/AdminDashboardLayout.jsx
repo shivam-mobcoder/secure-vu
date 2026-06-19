@@ -5,6 +5,7 @@ import {
     ClipboardList,
     LogOut,
     Tv,
+    Film,
     Users,
     Settings,
     ChevronDown,
@@ -88,6 +89,12 @@ export default function AdminDashboardLayout() {
                                     <NavLink to="live-feed" className={subNavClass}>
                                         <Tv size={18} />
                                         Live Feed
+                                    </NavLink>
+                                )}
+                                {hasPerm("live_feed") && (
+                                    <NavLink to="playback" className={subNavClass}>
+                                        <Film size={18} />
+                                        Playback
                                     </NavLink>
                                 )}
                                 <NavLink to="face/corporate-access" className={subNavClass}>

@@ -53,6 +53,7 @@ from queue import Queue
 from fractions import Fraction
 import threading
 import secrets
+import re
 from urllib.parse import quote
 from aiohttp import web, WSMsgType
 from collections import deque
@@ -88,7 +89,18 @@ except Exception as e:
     print(f"[AUTH] rbac import failed: {e}")
 
 try:
-    from db import db_get_camera, set_pool, db_list_users_by_client  # type: ignore
+    from db import (  # type: ignore
+        db_get_camera,
+        set_pool,
+        db_list_users_by_client,
+        db_get_user_by_id,
+        db_update_user_permissions,
+        db_insert_alert,
+        db_list_alerts,
+        db_insert_recording_segment,
+        db_list_recording_segments,
+        db_list_cameras_for_client,
+    )
 except Exception as e:
     print(f"[AUTH] db helper import failed: {e}")
 
@@ -255,6 +267,18 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    s = str(raw).strip().lower()
+    if s in ("1", "true", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+
 def _bool_param(val, default: bool = True) -> bool:
     if val is None:
         return default
@@ -284,6 +308,7 @@ RTSP_RETRY_DELAY_SEC = float(os.getenv("RTSP_RETRY_DELAY_SEC", "1.0"))
 
 # Alert queue for thread-safe communication
 alert_queue = Queue()
+db_persist_queue = Queue()
 
 # Runtime stats (thread-safe)
 stats_lock = threading.Lock()
@@ -465,6 +490,22 @@ EVENT_CLIP_DIR = Path(
         "EVENT_CLIP_DIR", str(Path(__file__).resolve().parent.parent / "event_clips")
     )
 )
+RECORDINGS_DIR = Path(
+    os.getenv(
+        "RECORDINGS_DIR", str(Path(__file__).resolve().parent.parent / "recordings")
+    )
+)
+CONTINUOUS_RECORDING_ENABLE = _bool_env("CONTINUOUS_RECORDING_ENABLE", True)
+CONTINUOUS_SEGMENT_SECS = int(os.getenv("CONTINUOUS_SEGMENT_SECS", "300"))
+LINGER_SECONDS = int(os.getenv("LINGER_SECONDS", "30"))
+MOTION_ENABLE = _bool_env("MOTION_ENABLE", True)
+MOTION_THRESH = float(os.getenv("MOTION_THRESH", "0.02"))
+MOTION_ALERT_GAP_SEC = float(os.getenv("MOTION_ALERT_GAP_SEC", "30"))
+MOTION_ONLY_WHEN_NO_PERSONS = _bool_env("MOTION_ONLY_WHEN_NO_PERSONS", True)
+FACE_MIN_BBOX_HEIGHT = int(os.getenv("FACE_MIN_BBOX_HEIGHT", "60"))
+
+_segment_writers_lock = threading.Lock()
+_segment_writers: dict = {}
 
 # Optional runtime-persisted feature flags (so UI toggles survive restarts).
 # This is separate from .env so operators can flip features without redeploy.
@@ -1090,6 +1131,7 @@ pid_smooth = {}  # pid -> (x1,y1,x2,y2)
 pid_smooth_lock = threading.Lock()
 
 from bbox_smoother import BBoxSmoother
+from recording import SegmentWriter, update_camera_health, get_camera_health_snapshot
 
 # Bounding Box Smoothing Configurations
 BBOX_SMOOTHING_MODE = os.getenv("BBOX_SMOOTHING_MODE", "fixed").strip().lower()
@@ -1879,6 +1921,7 @@ def _get_camera_state(camera_id):
                 "roi_inside": {},
                 "line_side": {},
                 "parking": {},
+                "linger": {},
                 "alert_last": {},
                 "lock": threading.Lock(),
             }
@@ -2255,6 +2298,56 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
                     if pid not in seen_pids:
                         pid_map.pop(pid, None)
 
+        # Loitering — person dwell inside ROI intrusion zones
+        roi_loiter = rules.get("roi_intrusion", {})
+        if roi_loiter.get("enabled"):
+            linger_max = max(1, int(roi_loiter.get("linger_seconds", LINGER_SECONDS)))
+            for zone in roi_loiter.get("zones", []) or []:
+                zone_id = zone.get("id") or "roi"
+                points = zone.get("points", [])
+                if not points:
+                    continue
+                entity_map = state["linger"].setdefault(zone_id, {})
+                seen_entities = set()
+                for det in det_items:
+                    if not _class_matches(det, zone.get("classes") or ["person"]):
+                        continue
+                    cx, cy = det.get("center", (0, 0))
+                    inside = _point_in_poly(
+                        cx / frame_shape[1], cy / frame_shape[0], points
+                    )
+                    if not inside:
+                        continue
+                    entity = det.get("work_key") or f"pid:{det.get('pid')}"
+                    seen_entities.add(entity)
+                    rec = entity_map.get(entity)
+                    if rec is None:
+                        entity_map[entity] = {"since": ts, "alerted": False}
+                    else:
+                        elapsed = ts - rec.get("since", ts)
+                        if elapsed >= linger_max and not rec.get("alerted"):
+                            if _state_throttle(
+                                state,
+                                f"linger:{zone_id}:{entity}",
+                                ALERT_LINE_ZONE_MIN_GAP,
+                            ):
+                                ev = f"P2 | CAM{cam_key} | LOITERING | {zone_id}"
+                                send_alert(_alert_subject(det), ev)
+                                _queue_event_clip(
+                                    camera_id,
+                                    ev,
+                                    _alert_subject(det),
+                                    ts,
+                                    {
+                                        "zone_id": zone_id,
+                                        "linger_seconds": linger_max,
+                                    },
+                                )
+                            rec["alerted"] = True
+                for entity in list(entity_map.keys()):
+                    if entity not in seen_entities:
+                        entity_map.pop(entity, None)
+
 
 # --------------------------------------------------
 # ALERT SYSTEM (USE OLD VERSION)
@@ -2323,6 +2416,99 @@ def has_active_alert_channel():
     )
 
 
+def _parse_alert_event(event: str) -> tuple[int | None, int | None]:
+    priority = None
+    camera_id = None
+    for part in (event or "").split("|"):
+        token = part.strip()
+        m_pri = re.match(r"^P(\d+)$", token, re.I)
+        if m_pri:
+            try:
+                priority = int(m_pri.group(1))
+            except Exception:
+                pass
+            continue
+        m_cam = re.match(r"^CAM(\d+)$", token, re.I)
+        if m_cam:
+            try:
+                camera_id = int(m_cam.group(1))
+            except Exception:
+                pass
+    return priority, camera_id
+
+
+def _enqueue_db_persist(job: dict) -> None:
+    try:
+        db_persist_queue.put_nowait(job)
+    except Exception:
+        pass
+
+
+def _enqueue_segment_persist(info: dict) -> None:
+    path = Path(info.get("path", ""))
+    try:
+        rel = str(path.relative_to(RECORDINGS_DIR))
+    except Exception:
+        rel = str(path)
+    _enqueue_db_persist(
+        {
+            "type": "segment",
+            "camera_id": info.get("camera_id"),
+            "path": rel.replace("\\", "/"),
+            "start_ts": info.get("start_ts"),
+            "end_ts": info.get("end_ts"),
+            "size_bytes": info.get("size_bytes", 0),
+        }
+    )
+
+
+def _get_segment_writer(camera_id):
+    if not CONTINUOUS_RECORDING_ENABLE or camera_id is None:
+        return None
+    with _segment_writers_lock:
+        writer = _segment_writers.get(camera_id)
+        if writer is None:
+            seg_fps = max(1, min(15, int(PROCESSING_FPS)))
+            writer = SegmentWriter(
+                camera_id,
+                RECORDINGS_DIR,
+                segment_secs=CONTINUOUS_SEGMENT_SECS,
+                fps=seg_fps,
+            )
+            writer.set_on_segment_closed(_enqueue_segment_persist)
+            _segment_writers[camera_id] = writer
+        return writer
+
+
+def _check_motion_detected(camera_id, frame, person_count: int = 0) -> None:
+    if not MOTION_ENABLE or camera_id is None:
+        return
+    if MOTION_ONLY_WHEN_NO_PERSONS and person_count > 0:
+        return
+    try:
+        cs = _cs(camera_id)
+        small = cv2.resize(frame, (320, 180))
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        bg = cs.get("motion_bg")
+        if bg is None:
+            cs["motion_bg"] = gray.astype(np.float32)
+            return
+        diff = cv2.absdiff(gray, bg.astype(np.uint8))
+        cs["motion_bg"] = (0.95 * bg + 0.05 * gray.astype(np.float32))
+        motion_pct = float(np.count_nonzero(diff > 25)) / float(diff.size)
+        if motion_pct <= MOTION_THRESH:
+            return
+        now = time.time()
+        last = float(cs.get("motion_last_alert", 0.0))
+        if now - last < MOTION_ALERT_GAP_SEC:
+            return
+        cs["motion_last_alert"] = now
+        cam_key = _camera_key(camera_id)
+        send_alert("SYSTEM", f"P2 | CAM{cam_key} | MOTION_DETECTED")
+    except Exception:
+        pass
+
+
 def send_alert(person, event, clip_url: str | None = None, meta: dict | None = None):
     """Thread-safe alert sending"""
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -2337,8 +2523,26 @@ def send_alert(person, event, clip_url: str | None = None, meta: dict | None = N
     with recognition_log_lock:
         recognition_log.appendleft(log_entry)
 
-    if not has_active_alert_channel():
-        return
+    priority, camera_id = _parse_alert_event(event)
+    client_id = None
+    if isinstance(meta, dict) and meta.get("client_id") is not None:
+        try:
+            client_id = int(meta.get("client_id"))
+        except Exception:
+            client_id = None
+    _enqueue_db_persist(
+        {
+            "type": "alert",
+            "client_id": client_id,
+            "camera_id": camera_id,
+            "person": person,
+            "event": event,
+            "priority": priority,
+            "clip_url": clip_url,
+            "meta": meta,
+        }
+    )
+
     logger.info(f"📨 Queueing alert: {person} - {event}")
     payload = {
         "person": person,
@@ -3665,6 +3869,11 @@ def process_frame(
                 f"📏 ROI AREA: ({wx1},{wy1}) to ({wx2},{wy2}) [{wx2 - wx1}x{wy2 - wy1}px]"
             )
 
+    cached_person_count = sum(
+        1 for d in (cs.get("draw_dets") or []) if d.get("is_person")
+    )
+    _check_motion_detected(camera_id, frame, cached_person_count)
+
     should_process = (
         process_frame.frame_counter % YOLO_PROCESS_EVERY_N_FRAMES == 0
         or cs["yolo_frame"] is None
@@ -3974,11 +4183,16 @@ def process_frame(
         if face_lock_acquired:
             face_start = time.time()
             try:
+                filtered_entries = [
+                    entry
+                    for entry in person_entries
+                    if (entry[5] - entry[3]) >= FACE_MIN_BBOX_HEIGHT
+                ]
                 boxes_for_batch = [
-                    (x1, y1, x2, y2) for _, _, x1, y1, x2, y2 in person_entries
+                    (x1, y1, x2, y2) for _, _, x1, y1, x2, y2 in filtered_entries
                 ]
                 batch = faceid.recognize_batch(frame, boxes_for_batch)
-                for (det_i, pid_i, *_), result in zip(person_entries, batch):
+                for (det_i, pid_i, *_), result in zip(filtered_entries, batch):
                     batch_results[det_i] = result
             except Exception as _face_err:
                 logger.warning("[FACE] recognize_batch error: %s", _face_err)
@@ -4334,6 +4548,55 @@ async def process_alert_queue():
     except Exception as e:
         logger.error(f"Alert queue processor error: {e}")
 
+
+async def persist_db_queue():
+    """Persist alerts and recording segments to PostgreSQL."""
+    logger.info("DB persist queue processor started")
+    try:
+        while True:
+            await asyncio.sleep(0.1)
+            while not db_persist_queue.empty():
+                job = db_persist_queue.get()
+                try:
+                    if not isinstance(job, dict):
+                        continue
+                    job_type = job.get("type")
+                    if job_type == "alert" and db_insert_alert:
+                        client_id = job.get("client_id")
+                        camera_id = job.get("camera_id")
+                        if client_id is None and camera_id is not None and db_get_camera:
+                            try:
+                                cam_row = await db_get_camera(int(camera_id))
+                                if cam_row:
+                                    client_id = cam_row.get("client_id")
+                            except Exception:
+                                pass
+                        await db_insert_alert(
+                            client_id,
+                            camera_id,
+                            job.get("person", "SYSTEM"),
+                            job.get("event", ""),
+                            job.get("priority"),
+                            job.get("clip_url"),
+                            job.get("meta"),
+                        )
+                    elif job_type == "segment" and db_insert_recording_segment:
+                        await db_insert_recording_segment(
+                            job.get("camera_id"),
+                            job.get("path"),
+                            job.get("start_ts"),
+                            job.get("end_ts"),
+                            job.get("size_bytes"),
+                        )
+                except Exception as e:
+                    logger.warning(f"DB persist job failed: {e}")
+                finally:
+                    db_persist_queue.task_done()
+    except asyncio.CancelledError:
+        logger.info("DB persist queue processor cancelled")
+    except Exception as e:
+        logger.error(f"DB persist queue processor error: {e}")
+
 async def processing_loop(latest_holder, stop_event):
     """Legacy stub — kept for backward-compat import but never called."""
     pass
@@ -4375,6 +4638,7 @@ class SharedServerCamera:
         # reads are never stalled waiting for YOLO/face detection to finish.
         self._raw_frame = None
         self._raw_lock = threading.Lock()
+        self._reconnect_count = 0
 
     def add_client(self):
         with self._lock:
@@ -4479,6 +4743,7 @@ class SharedServerCamera:
         cap = None
         last_open_fail = 0.0
         last_ok = time.time()
+        had_cap = False
         try:
             while not cap_stop.is_set() and not self._stop_evt.is_set():
                 # ---- ensure open ----
@@ -4487,6 +4752,14 @@ class SharedServerCamera:
                         cap = self._make_cap()
                         if cap is None:
                             last_open_fail = time.time()
+                            update_camera_health(self._camera_id, last_frame_ts=0.0)
+                        elif had_cap:
+                            self._reconnect_count += 1
+                            update_camera_health(
+                                self._camera_id,
+                                reconnect_count=self._reconnect_count,
+                            )
+                        had_cap = cap is not None
                     time.sleep(0.05)  # always yield after an open attempt
                     continue
 
@@ -4499,11 +4772,22 @@ class SharedServerCamera:
                     except Exception:
                         pass
                     cap = None
+                    had_cap = False
                     last_open_fail = time.time()
                     continue
 
                 if ok and frame is not None:
                     last_ok = time.time()
+                    update_camera_health(
+                        self._camera_id, last_frame_ts=last_ok
+                    )
+                    if CONTINUOUS_RECORDING_ENABLE and self._camera_id is not None:
+                        try:
+                            writer = _get_segment_writer(self._camera_id)
+                            if writer is not None:
+                                writer.write(frame, last_ok)
+                        except Exception:
+                            pass
                     with self._raw_lock:
                         self._raw_frame = frame
                 else:
@@ -4513,6 +4797,7 @@ class SharedServerCamera:
                         except Exception:
                             pass
                         cap = None
+                        had_cap = False
                         last_open_fail = time.time()
                     else:
                         time.sleep(0.005)
@@ -4826,6 +5111,69 @@ async def update_member_permissions(request):
 
     await db_update_user_permissions(uid, permissions)
     return web.json_response({"status": "ok", "permissions": permissions})
+
+
+async def api_list_alerts(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin", "member"])
+    if not db_list_alerts:
+        return web.json_response({"alerts": []})
+    client_id = user.get("client_id")
+    try:
+        limit = int(request.query.get("limit", "50"))
+    except Exception:
+        limit = 50
+    camera_q = request.query.get("camera_id")
+    camera_id = int(camera_q) if camera_q not in (None, "") else None
+    alerts = await db_list_alerts(
+        client_id=client_id, camera_id=camera_id, limit=limit
+    )
+    return web.json_response({"alerts": alerts})
+
+
+async def api_list_recordings(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin", "member"])
+    if not db_list_recording_segments:
+        return web.json_response({"recordings": []})
+    try:
+        limit = int(request.query.get("limit", "50"))
+    except Exception:
+        limit = 50
+    camera_q = request.query.get("camera_id")
+    camera_id = int(camera_q) if camera_q not in (None, "") else None
+    segments = await db_list_recording_segments(camera_id=camera_id, limit=limit)
+    for seg in segments:
+        path = str(seg.get("path") or "").lstrip("/")
+        seg["url"] = f"/recordings/{path}" if path else ""
+    return web.json_response({"recordings": segments})
+
+
+async def api_cameras_health(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin", "member"])
+    live = get_camera_health_snapshot()
+    client_id = user.get("client_id")
+    cameras = []
+    if client_id is not None and db_list_cameras_for_client:
+        try:
+            cameras = await db_list_cameras_for_client(client_id)
+        except Exception:
+            cameras = []
+    out = []
+    for cam in cameras:
+        cid = cam.get("id")
+        h = live.get(
+            cid,
+            {
+                "camera_id": cid,
+                "status": "offline",
+                "last_frame_ts": 0.0,
+                "reconnect_count": 0,
+            },
+        )
+        out.append({**cam, **h})
+    return web.json_response({"cameras": out})
 
 
 # SAVE WEB ROI
@@ -6079,6 +6427,7 @@ def main():
 
         # Start alert queue processor
         app["alert_processor"] = asyncio.create_task(process_alert_queue())
+        app["db_persist_processor"] = asyncio.create_task(persist_db_queue())
         logger.info("✅ Alert queue processor started")
         try:
             _start_background_cctv_analytics()
@@ -6156,6 +6505,12 @@ def main():
                 await app["alert_processor"]
             except asyncio.CancelledError:
                 pass
+        if "db_persist_processor" in app:
+            app["db_persist_processor"].cancel()
+            try:
+                await app["db_persist_processor"]
+            except asyncio.CancelledError:
+                pass
         # Cancel stats reporter
         if "stats_reporter" in app:
             app["stats_reporter"].cancel()
@@ -6210,6 +6565,9 @@ def main():
     # Member Management API (Admin only)
     app.router.add_get("/api/admin/members", list_members)
     app.router.add_patch("/api/admin/members/{id}/permissions", update_member_permissions)
+    app.router.add_get("/api/alerts", api_list_alerts)
+    app.router.add_get("/api/recordings", api_list_recordings)
+    app.router.add_get("/api/cameras/health", api_cameras_health)
 
     # Runtime toggle: when disabled, alerts still work but no video clips are captured.
     app.router.add_get("/api/event-clips/settings", event_clips_get_settings)
@@ -6226,6 +6584,11 @@ def main():
         app.router.add_static("/event-clips/", str(EVENT_CLIP_DIR), show_index=True)
     except Exception as e:
         logger.warning(f"Event clip static route disabled: {e}")
+    try:
+        RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+        app.router.add_static("/recordings/", str(RECORDINGS_DIR), show_index=True)
+    except Exception as e:
+        logger.warning(f"Recording static route disabled: {e}")
 
     sslctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     sslctx.load_cert_chain(

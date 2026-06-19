@@ -29,7 +29,12 @@ const EVENT_TYPE_LABELS = {
     MAX_PEOPLE:                  'Crowd Limit Exceeded',
     NEW_PERSON_SEEN:             'New Person Detected',
     LINE_CROSS:                  'Virtual Line Crossed',
+    'LINE CROSS':                'Virtual Line Crossed',
+    CROSS:                       'Virtual Line Crossed',
     LOITERING:                   'Loitering Detected',
+    PARKING_LIMIT:               'Parking / Dwell Limit',
+    MOTION_DETECTED:             'Motion Detected',
+    WEBROI:                      'Web ROI Event',
     FACE_RECOGNIZED:             'Face Recognized',
     FACE_ENROLLED:               'Face Enrolled',
     DATA_CHANNEL_CONNECTED:      'System Connected',
@@ -46,18 +51,34 @@ function parseEventString(raw = '') {
     let priority = null;
 
     for (const part of parts) {
-        if (/^P[0-9]$/.test(part)) {
-            priority = part;
+        if (/^P[0-9]$/i.test(part)) {
+            priority = part.toUpperCase();
         } else if (/^CAM\d+$/i.test(part)) {
             const num = part.replace(/^CAM/i, '');
             camera = `Camera ${num}`;
         } else if (!eventType) {
-            // First non-priority, non-camera part is the event type
-            const label = EVENT_TYPE_LABELS[part] || EVENT_TYPE_LABELS[part.replace(/\s+/g, '_')];
-            if (label) eventType = label;
-            else if (part && !part.startsWith('Person-') && !part.startsWith('pid:')) {
-                // Try partial match
-                const key = Object.keys(EVENT_TYPE_LABELS).find(k => part.includes(k));
+            const normalized = part.replace(/\s+/g, '_').toUpperCase();
+            const label = EVENT_TYPE_LABELS[part]
+                || EVENT_TYPE_LABELS[normalized]
+                || EVENT_TYPE_LABELS[part.replace(/\s+/g, '_')];
+            if (label) {
+                eventType = label;
+            } else if (part.includes('LINE') && part.includes('CROSS')) {
+                eventType = EVENT_TYPE_LABELS.LINE_CROSS;
+            } else if (part.startsWith('LINE ') || part.includes('LINE')) {
+                eventType = EVENT_TYPE_LABELS.LINE_CROSS;
+            } else if (part.includes('PARKING_LIMIT') || part.includes('PARKING LIMIT')) {
+                eventType = EVENT_TYPE_LABELS.PARKING_LIMIT;
+            } else if (part.includes('MOTION_DETECTED') || part.includes('MOTION DETECTED')) {
+                eventType = EVENT_TYPE_LABELS.MOTION_DETECTED;
+            } else if (part.includes('MAX_PEOPLE') || part.includes('MAX PEOPLE')) {
+                eventType = EVENT_TYPE_LABELS.MAX_PEOPLE;
+            } else if (part.includes('LOITERING')) {
+                eventType = EVENT_TYPE_LABELS.LOITERING;
+            } else if (part.includes('WEBROI') || part.includes('WEB ROI')) {
+                eventType = EVENT_TYPE_LABELS.WEBROI;
+            } else if (part && !part.startsWith('Person-') && !part.startsWith('pid:')) {
+                const key = Object.keys(EVENT_TYPE_LABELS).find(k => part.toUpperCase().includes(k));
                 eventType = key ? EVENT_TYPE_LABELS[key] : null;
             }
         }
@@ -137,6 +158,12 @@ export default function AdminFeed() {
     const alertsRef = useRef([]);
     const ackedIds = useRef(loadAckedIds());
     const mountedRef = useRef(true);
+    const [cameraHealth, setCameraHealth] = useState([]);
+
+    const onlineCount = cameraHealth.filter(c => c.status === 'online').length;
+    const healthSummary = cameraHealth.length
+        ? `${onlineCount}/${cameraHealth.length} cameras online`
+        : 'Checking cameras…';
 
     // Build iframe URL
     const token = getStoredToken();
@@ -183,6 +210,59 @@ export default function AdminFeed() {
             a.id === id ? { ...a, acknowledged: true, isNew: false } : a
         );
         setAlerts([...alertsRef.current]);
+    }, []);
+
+    // ── Hydrate alert history from Postgres ───────────────────────────────
+    useEffect(() => {
+        const authToken = getStoredToken();
+        if (!authToken) return;
+
+        fetch(`${BACKEND}/api/alerts?limit=50`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+        })
+            .then(res => (res.ok ? res.json() : { alerts: [] }))
+            .then(data => {
+                if (!mountedRef.current) return;
+                const hydrated = (data.alerts || []).map(row => {
+                    const id = `db_${row.id}`;
+                    return {
+                        id,
+                        person: row.person || 'SYSTEM',
+                        event: row.event || '',
+                        timestamp: row.created_at || row.timestamp || new Date().toISOString(),
+                        clip_url: row.clip_url || '',
+                        meta: row.meta || null,
+                        isNew: false,
+                        acknowledged: ackedIds.current.has(id),
+                    };
+                });
+                alertsRef.current = hydrated.slice(0, MAX_ALERTS);
+                setAlerts([...alertsRef.current]);
+            })
+            .catch(() => { /* history optional until migration runs */ });
+    }, []);
+
+    // ── Camera health polling ─────────────────────────────────────────────
+    useEffect(() => {
+        const authToken = getStoredToken();
+        if (!authToken) return;
+
+        function pollHealth() {
+            fetch(`${BACKEND}/api/cameras/health`, {
+                headers: { Authorization: `Bearer ${authToken}` },
+            })
+                .then(res => (res.ok ? res.json() : { cameras: [] }))
+                .then(data => {
+                    if (mountedRef.current) {
+                        setCameraHealth(data.cameras || []);
+                    }
+                })
+                .catch(() => {});
+        }
+
+        pollHealth();
+        const interval = setInterval(pollHealth, 15000);
+        return () => clearInterval(interval);
     }, []);
 
     // ── Listen for alerts forwarded from the iframe via postMessage ────────
@@ -261,8 +341,8 @@ export default function AdminFeed() {
                     <div className="af-alerts-header-left">
                         <h2 className="af-alerts-title">Security Alerts</h2>
                         <div className="af-alerts-status">
-                            <span className="af-status-dot af-status-dot--live" />
-                            <span className="af-alerts-subtitle">Live Monitoring</span>
+                            <span className={`af-status-dot ${onlineCount > 0 ? 'af-status-dot--live' : ''}`} />
+                            <span className="af-alerts-subtitle">{healthSummary}</span>
                         </div>
                     </div>
                     <div className="af-alerts-actions">

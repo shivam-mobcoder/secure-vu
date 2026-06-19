@@ -33,3 +33,8 @@ Project guides, deployment notes, model reports, and planning documents.
 | Document | Description |
 |----------|-------------|
 | [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | Chronological development notes |
+| [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | Frozen 12-minute POC demonstration script |
+
+## Architecture (POC week 1)
+
+Week 1 delivers a **feature-complete monolith**: live WebRTC, YOLO + InsightFace analytics, rules engine, event clips, alert persistence, and continuous recording segments — all in `app/server.py`. Week 2+ may split media ingest and analytics into separate services; that refactor is explicitly out of scope for the POC branch.
