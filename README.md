@@ -45,11 +45,18 @@ secure-vu/
 ├── config/                     # Runtime flags (JSON, auto-generated)
 ├── static/                     # Legacy HTML client
 ├── scripts/                    # Utility / test scripts
+├── docs/                       # Guides, reports, and planning documents
 ├── docker-compose.yml          # Full-stack orchestration (DB + App)
 ├── Dockerfile                  # App container
 ├── pyproject.toml              # Python project & uv config
 └── .env                        # Environment variables (secrets, tuning)
 ```
+
+---
+
+## Documentation
+
+See **[docs/README.md](docs/README.md)** for setup guides, deployment notes, model reports, and planning documents.
 
 ---
 
