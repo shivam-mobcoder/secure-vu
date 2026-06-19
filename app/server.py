@@ -369,7 +369,7 @@ FACE_ENABLE = os.getenv("FACE_ENABLE", "1").strip() == "1"
 # 6 = PRODUCTION MODE — secure_cv_best.pt + InsightFace + all features (default)
 # 8 = OPEN WORLD MODE — yolov8s-worldv2.pt (YOLO-World)
 MODEL_SELECT = _int_env("MODEL_SELECT", 6)
-if MODEL_SELECT not in (1, 2, 3, 4, 5, 6, 7, 8):
+if MODEL_SELECT not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
     print(f"⚠️ Invalid MODEL_SELECT={MODEL_SELECT}, defaulting to 7 (full package)")
     MODEL_SELECT = 7
 print(f"🔧 MODEL_SELECT={MODEL_SELECT}")
@@ -1089,54 +1089,38 @@ def enroll_face(name: str, frames: list, client_id=None):
 pid_smooth = {}  # pid -> (x1,y1,x2,y2)
 pid_smooth_lock = threading.Lock()
 
-# Tunable via env:
-#   BBOX_SMOOTH_ALPHA : 0.0-1.0  weight on previous position (higher → smoother/less flicker)
-#   BBOX_JUMP_THRESH  : multiplier of bbox height; if centre moves further than this,
-#                       snap immediately (prevents "box between people" on ID swaps)
-_SMOOTH_ALPHA = float(os.getenv("BBOX_SMOOTH_ALPHA", "0.75"))
-_SMOOTH_JUMP_THRESH = float(os.getenv("BBOX_JUMP_THRESH", "1.5"))
+from bbox_smoother import BBoxSmoother
+
+# Bounding Box Smoothing Configurations
+BBOX_SMOOTHING_MODE = os.getenv("BBOX_SMOOTHING_MODE", "fixed").strip().lower()
+BBOX_FIXED_ALPHA = float(os.getenv("BBOX_FIXED_ALPHA", os.getenv("BBOX_SMOOTH_ALPHA", "0.75")))
+BBOX_ALPHA_HIGH = float(os.getenv("BBOX_ALPHA_HIGH", "0.30"))
+BBOX_ALPHA_MEDIUM = float(os.getenv("BBOX_ALPHA_MEDIUM", "0.55"))
+BBOX_ALPHA_LOW = float(os.getenv("BBOX_ALPHA_LOW", "0.80"))
+BBOX_CONF_HIGH = float(os.getenv("BBOX_CONF_HIGH", "0.85"))
+BBOX_CONF_MEDIUM = float(os.getenv("BBOX_CONF_MEDIUM", "0.60"))
+
+bbox_smoother = BBoxSmoother(
+    mode=BBOX_SMOOTHING_MODE,
+    fixed_alpha=BBOX_FIXED_ALPHA,
+    alpha_high=BBOX_ALPHA_HIGH,
+    alpha_medium=BBOX_ALPHA_MEDIUM,
+    alpha_low=BBOX_ALPHA_LOW,
+    conf_high=BBOX_CONF_HIGH,
+    conf_medium=BBOX_CONF_MEDIUM
+)
 
 
-def smooth_bbox(pid, box, alpha=_SMOOTH_ALPHA):
-    """EMA bbox smoothing with ID-swap / large-jump detection.
-
-    alpha: weight on the *previous* position (0.6 default gives smooth motion
-    with ≤ 1-frame lag for a person walking at normal speed).
-
-    When the detected centre jumps by more than ``_SMOOTH_JUMP_THRESH × prev_height``
-    we snap immediately to the new position instead of blending.  This eliminates
-    the "ghost box drifting between two people" artefact that occurs when
-    ByteTracker swaps track IDs for closely adjacent persons.
-    """
+def smooth_bbox(pid, box, confidence=1.0):
+    """EMA bbox smoothing delegation to BBoxSmoother."""
     with pid_smooth_lock:
         if pid not in pid_smooth:
             pid_smooth[pid] = box
             return box
 
-        px1, py1, px2, py2 = pid_smooth[pid]
-        x1, y1, x2, y2 = box
-
-        # ── Jump detection (ID-swap guard) ───────────────────────────────────
-        old_cx = (px1 + px2) * 0.5
-        old_cy = (py1 + py2) * 0.5
-        new_cx = (x1 + x2) * 0.5
-        new_cy = (y1 + y2) * 0.5
-        prev_h = max(1.0, float(py2 - py1))
-        jump = ((new_cx - old_cx) ** 2 + (new_cy - old_cy) ** 2) ** 0.5
-        if jump > _SMOOTH_JUMP_THRESH * prev_h:
-            # Centre moved more than ~1.2× the person's height in one frame —
-            # almost certainly an ID swap.  Snap to new position to avoid the
-            # interpolated box hanging in the space between two people.
-            pid_smooth[pid] = box
-            return box
-
-        sx1 = int(alpha * px1 + (1 - alpha) * x1)
-        sy1 = int(alpha * py1 + (1 - alpha) * y1)
-        sx2 = int(alpha * px2 + (1 - alpha) * x2)
-        sy2 = int(alpha * py2 + (1 - alpha) * y2)
-
-        pid_smooth[pid] = (sx1, sy1, sx2, sy2)
+        pid_smooth[pid] = bbox_smoother.smooth(pid_smooth[pid], box, confidence)
         return pid_smooth[pid]
+
 
 
 def force_h264(pc):
@@ -1252,6 +1236,8 @@ face_det_model = None   # YOLO face detector (yolov8n-face.pt)
 fire_model = None        # Fire/smoke detector (fire_smoke.pt)
 lpd_model = None         # License plate detector (model.pt)
 yolo_model = None        # General YOLO object detector
+CURRENT_YOLO_RUNTIME = "pytorch"
+
 
 
 def _load_yolo_model(path, label="YOLO"):
@@ -1262,7 +1248,11 @@ def _load_yolo_model(path, label="YOLO"):
         print(f"⚠️ {label} weights not found at {path}, skipping")
         return None
     print(f"🔁 Loading {label} weights from: {path}")
+    is_engine = path.endswith(".engine")
     model = YOLO(path)
+    if is_engine:
+        print(f"⚡ {label} loaded as TensorRT engine")
+        return model
     model.to(device)
     if use_cuda and YOLO_ENABLE_FUSE:
         try:
@@ -1280,42 +1270,171 @@ def _load_yolo_model(path, label="YOLO"):
     return model
 
 
+
+_PRODUCTION_CONFIGS = {
+    6: {
+        "mode": "Production",
+        "variant": "YOLO11m",
+        "weights": "models/yolo/secure_cv_best.pt",
+        "specialized": "Disabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    7: {
+        "mode": "Full Package",
+        "variant": "YOLO11m",
+        "weights": "models/yolo/secure_cv_best.pt",
+        "specialized": "Enabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    9: {
+        "mode": "Production",
+        "variant": "YOLO11l",
+        "weights": "models/yolo/secure_cv_best_l.pt",
+        "specialized": "Disabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    10: {
+        "mode": "Production",
+        "variant": "YOLO11x",
+        "weights": "models/yolo/secure_cv_best_x.pt",
+        "specialized": "Disabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    11: {
+        "mode": "Full Package",
+        "variant": "YOLO11l",
+        "weights": "models/yolo/secure_cv_best_l.pt",
+        "specialized": "Enabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    },
+    12: {
+        "mode": "Full Package",
+        "variant": "YOLO11x",
+        "weights": "models/yolo/secure_cv_best_x.pt",
+        "specialized": "Enabled",
+        "face_rec": "Enabled",
+        "open_world": "Disabled"
+    }
+}
+
+
 # --- Determine which YOLO weights to use for the general model ---
-_yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7, 8)
+_yolo_general_needed = MODEL_SELECT in (1, 5, 6, 7, 8, 9, 10, 11, 12)
 if _yolo_general_needed:
     if MODEL_SELECT == 8:
         weights_path = str(REPO_ROOT / "models" / "yolo" / "yolov8s-worldv2.pt")
-    elif MODEL_SELECT in (6, 7):
-        # Production/Full mode: always use the high-accuracy model
-        weights_path = str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
+    elif MODEL_SELECT in _PRODUCTION_CONFIGS:
+        config = _PRODUCTION_CONFIGS[MODEL_SELECT]
+        prod_weights = config["weights"]
+
+        # Resolve path
+        if not os.path.isabs(prod_weights):
+            resolved_weights_path = REPO_ROOT / prod_weights
+        else:
+            resolved_weights_path = Path(prod_weights)
+
+        # Fail fast if it does not exist
+        if not resolved_weights_path.exists():
+            print("ERROR: Production model not found\n")
+            print(prod_weights)
+            print("\nPlease update MODEL_SELECT or restore the model file.")
+            sys.exit(1)
+
+        # Print startup banner
+        device_str = "CUDA" if use_cuda else "CPU"
+        fp16_str = "Enabled" if YOLO_ENABLE_FP16 else "Disabled"
+
+        print("==========================================")
+        print("SecureVU Detection Configuration")
+        print("==========================================")
+        print(f"MODEL_SELECT      : {MODEL_SELECT}")
+        print(f"Mode              : {config['mode']}")
+        print(f"Variant           : {config['variant']}")
+        print(f"Weights           : {config['weights']}")
+        print(f"Specialized       : {config['specialized']}")
+        print(f"Face Recognition  : {config['face_rec']}")
+        print(f"Open World        : {config['open_world']}")
+        print(f"Device            : {device_str}")
+        print(f"FP16              : {fp16_str}")
+        print("==========================================")
+
+        weights_path = str(resolved_weights_path)
     else:
         weights_path = os.environ.get(
             "YOLO_WEIGHTS", str(REPO_ROOT / "models" / "yolo" / "secure_cv_best.pt")
         )
-    yolo_model = _load_yolo_model(weights_path, "YOLO-General")
+
+    # TensorRT vs PyTorch runtime selection and automatic fallback
+    base_weights_path = weights_path
+    model_runtime = os.environ.get("MODEL_RUNTIME", "pytorch").lower()
+    yolo_model = None
+
+    if model_runtime == "tensorrt":
+        engine_path = Path(base_weights_path).with_suffix(".engine")
+        if engine_path.exists():
+            print(f"⚡ TensorRT mode selected. Trying engine: {engine_path}")
+            try:
+                weights_path = str(engine_path)
+                yolo_model = _load_yolo_model(weights_path, "YOLO-General")
+                if yolo_model is not None:
+                    CURRENT_YOLO_RUNTIME = "tensorrt"
+            except Exception as e:
+                print(f"⚠️ WARNING: Failed to load TensorRT engine {engine_path.name}: {e}")
+                print("Falling back to PyTorch (.pt)...")
+                yolo_model = None
+        else:
+            print(f"⚠️ WARNING: TensorRT mode selected, but engine {engine_path.name} not found. Falling back to PyTorch.")
+
+    if yolo_model is None:
+        weights_path = base_weights_path
+        yolo_model = _load_yolo_model(weights_path, "YOLO-General")
+        CURRENT_YOLO_RUNTIME = "pytorch"
+
+    # Print SecureVU Runtime banner
+    device_str = "CUDA" if use_cuda else "CPU"
+    banner_runtime = "TensorRT" if CURRENT_YOLO_RUNTIME == "tensorrt" else "PyTorch"
+    banner_precision = "FP16" if (CURRENT_YOLO_RUNTIME == "tensorrt" or YOLO_ENABLE_FP16) else "FP32"
+    banner_model_name = Path(weights_path).stem
+    banner_engine = os.path.basename(weights_path) if CURRENT_YOLO_RUNTIME == "tensorrt" else "N/A"
+
+    print("==========================================")
+    print("SecureVU Runtime")
+    print("==========================================")
+    print(f"Model           : {banner_model_name}")
+    print(f"Runtime         : {banner_runtime}")
+    print(f"Precision       : {banner_precision}")
+    print(f"Device          : {device_str}")
+    if banner_runtime == "TensorRT":
+        print(f"Engine          : {banner_engine}")
+    print("==========================================")
 else:
     print(f"ℹ️ General YOLO model not loaded (MODEL_SELECT={MODEL_SELECT})")
 
 # --- Face Detection (yolov8n-face) ---
-if MODEL_SELECT in (2, 5, 7):
+if MODEL_SELECT in (2, 5, 7, 11, 12):
     face_det_model = _load_yolo_model(
         str(REPO_ROOT / "models" / "face" / "yolov8n-face.pt"), "YOLO-Face"
     )
 
 # --- Fire & Smoke ---
-if MODEL_SELECT in (3, 5, 7):
+if MODEL_SELECT in (3, 5, 7, 11, 12):
     fire_model = _load_yolo_model(
         str(REPO_ROOT / "models" / "fire" / "fire_smoke.pt"), "Fire-Smoke"
     )
 
 # --- License Plate Detection (LPD) ---
-if MODEL_SELECT in (4, 5, 7):
+if MODEL_SELECT in (4, 5, 7, 11, 12):
     lpd_model = _load_yolo_model(
         str(REPO_ROOT / "models" / "lpd" / "model.pt"), "LPD"
     )
 
-# --- Production/Full mode (6, 7): InsightFace face recognition ---
-if MODEL_SELECT in (6, 7):
+# --- Production/Full mode (6, 7, 9, 10, 11, 12): InsightFace face recognition ---
+if MODEL_SELECT in (6, 7, 9, 10, 11, 12):
     FACE_ENABLE = True
     print(f"✅ Full/Production mode: InsightFace recognition enabled (MODEL_SELECT={MODEL_SELECT})")
 
@@ -2520,7 +2639,7 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                 if len(pts) >= 2:
                     arr = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
                     cv2.polylines(
-                        frame, [arr], isClosed=True, color=(255, 220, 0), thickness=2
+                        frame, [arr], isClosed=True, color=(0, 255, 255), thickness=2
                     )
                     zx, zy = pts[0]
                     zid = str(zone.get("id") or "roi")
@@ -2530,7 +2649,7 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                         (zx + 4, max(16, zy - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
-                        (255, 220, 0),
+                        (0, 255, 255),
                         2,
                     )
     except Exception:
@@ -3316,6 +3435,61 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
 # --------------------------------------------------
 # FRAME PROCESSING (OPTIMIZED)
 # --------------------------------------------------
+def _get_semantic_color_and_label(det: dict, is_in_roi: bool, work_seconds: float = 0.0) -> tuple[tuple[int, int, int], str]:
+    is_person = bool(det.get("is_person"))
+    raw_name = det.get("name", "Unknown")
+    is_known = is_person and raw_name != "Unknown"
+    is_vehicle = bool(det.get("is_vehicle")) or det.get("label") in ["car", "truck", "bus", "motorcycle"]
+    is_fire = bool(det.get("is_fire"))
+    is_face = bool(det.get("is_face"))
+    is_plate = bool(det.get("is_plate"))
+    det_source = det.get("source")
+    
+    color = (0, 255, 0)  # Default: Green
+    draw_label = raw_name if is_known else ""
+
+    if is_person:
+        if is_known:
+            color = (255, 0, 255)  # Purple: Known Face
+            draw_label = raw_name
+        elif is_in_roi:
+            # Check loitering vs intrusion
+            if work_seconds >= 10.0:
+                color = (0, 165, 255)  # Orange: Loitering
+                draw_label = "Loitering"
+            else:
+                color = (0, 0, 255)  # Red: Intrusion
+                draw_label = "Intrusion"
+        else:
+            color = (255, 0, 0)  # Blue: Unknown Person
+            draw_label = "Unknown Person"
+    elif is_vehicle:
+        color = (255, 255, 0)  # Cyan: Vehicle
+        draw_label = (det.get("label") or "Vehicle").capitalize()
+    elif is_fire:
+        color = (0, 80, 255)  # Fire orange-red
+        draw_label = f"🔥 {det.get('label', 'FIRE').upper()}"
+    elif is_face and det_source == "face_det":
+        color = (255, 0, 255)  # Purple: Face
+        draw_label = "Face"
+    elif is_plate or det_source == "lpd":
+        color = (0, 255, 128)  # Plate
+        draw_label = "Plate"
+    else:
+        # Fallback category
+        color = (0, 255, 0)  # Green: Person/Other
+        draw_label = (det.get("label") or "Object").capitalize()
+
+    # Clean label format with confidence
+    conf = det.get("conf")
+    if conf:
+        if not draw_label:
+            draw_label = "Person" if is_person else (det.get("label") or "Object").capitalize()
+        draw_label = f"{draw_label} {conf:.0%}"
+        
+    return color, draw_label
+
+
 def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     if DISABLE_DRAWING:
         return
@@ -3400,11 +3574,8 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
     for det in cached or []:
         try:
             x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
-            raw_name = det.get("name", "Unknown")
-            pid = det.get("pid")
             is_person = bool(det.get("is_person"))
-            entity_key = det.get("work_key") or f"pid:{pid}"
-            is_known = is_person and raw_name != "Unknown"
+            entity_key = det.get("work_key") or f"pid:{det.get('pid')}"
 
             is_in_roi = False
             if roi_box and is_person:
@@ -3413,21 +3584,13 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
                         entity_key in roi_state and "WEBROI" in roi_state[entity_key]
                     )
 
-            if is_in_roi:
-                color = (0, 165, 255)
-                draw_label = f"{raw_name} (IN ROI)" if is_known else "IN ROI"
-            elif det.get("is_fire"):
-                color = (0, 80, 255)
-                draw_label = f"\ud83d\udd25 {det.get('label', 'FIRE').upper()}"
-            elif det.get("is_face") and det.get("source") == "face_det":
-                color = (255, 255, 0)
-                draw_label = "Face"
-            elif det.get("is_plate") or det.get("source") == "lpd":
-                color = (0, 255, 128)
-                draw_label = "Plate"
-            else:
-                color = (0, 255, 0)
-                draw_label = raw_name if is_known else ""
+            work_seconds = float(det.get("work_seconds") or 0.0)
+            if WORK_TIMER_ENABLE and is_person:
+                work_key = det.get("work_key")
+                if work_key is not None:
+                    work_seconds = _peek_work_timer(str(work_key), now_ts)
+
+            color, draw_label = _get_semantic_color_and_label(det, is_in_roi, work_seconds)
 
             cross_tag = (
                 _get_cross_overlay(camera_id, entity_key, now_ts) if is_person else None
@@ -3435,11 +3598,7 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
             if cross_tag:
                 draw_label = f"{draw_label} [{cross_tag}]"
 
-            work_seconds = float(det.get("work_seconds") or 0.0)
             if WORK_TIMER_ENABLE and is_person:
-                work_key = det.get("work_key")
-                if work_key is not None:
-                    work_seconds = _peek_work_timer(str(work_key), now_ts)
                 timer_txt = _format_timer(work_seconds)
                 draw_label = f"{draw_label} {timer_txt}".strip()
 
@@ -3718,25 +3877,25 @@ def process_frame(
 
     with torch.inference_mode():
         with torch.cuda.amp.autocast(enabled=amp_enabled):
-            # Face detection model (MODEL_SELECT 2, 5, 7)
+            # Face detection model (MODEL_SELECT 2, 5, 7, 11, 12)
             if face_det_model is not None:
-                _run_face = (MODEL_SELECT in (2, 7)) or (cam_frame_counter % max(1, FACE_DET_EVERY_N_FRAMES) == 0)
+                _run_face = (MODEL_SELECT in (2, 7, 11, 12)) or (cam_frame_counter % max(1, FACE_DET_EVERY_N_FRAMES) == 0)
                 if _run_face:
                     raw_dets.extend(_run_specialized_model(
                         face_det_model, small, "face_det", _spec_scale_x, _spec_scale_y
                     ))
 
-            # Fire/smoke model (MODEL_SELECT 3, 5, 7)
+            # Fire/smoke model (MODEL_SELECT 3, 5, 7, 11, 12)
             if fire_model is not None:
-                _run_fire = (MODEL_SELECT in (3, 7)) or (cam_frame_counter % max(1, FIRE_EVERY_N_FRAMES) == 0)
+                _run_fire = (MODEL_SELECT in (3, 7, 11, 12)) or (cam_frame_counter % max(1, FIRE_EVERY_N_FRAMES) == 0)
                 if _run_fire:
                     raw_dets.extend(_run_specialized_model(
                         fire_model, small, "fire", _spec_scale_x, _spec_scale_y
                     ))
 
-            # License plate model (MODEL_SELECT 4, 5, 7)
+            # License plate model (MODEL_SELECT 4, 5, 7, 11, 12)
             if lpd_model is not None:
-                _run_lpd = (MODEL_SELECT in (4, 7)) or (cam_frame_counter % max(1, LPD_EVERY_N_FRAMES) == 0)
+                _run_lpd = (MODEL_SELECT in (4, 7, 11, 12)) or (cam_frame_counter % max(1, LPD_EVERY_N_FRAMES) == 0)
                 if _run_lpd:
                     raw_dets.extend(_run_specialized_model(
                         lpd_model, small, "lpd", _spec_scale_x, _spec_scale_y
@@ -3799,7 +3958,7 @@ def process_frame(
                 pid = int(hash(stable_id) & 0x7FFFFFFF)
         except Exception:
             pid = i
-        x1, y1, x2, y2 = smooth_bbox(pid, (x1, y1, x2, y2))
+        x1, y1, x2, y2 = smooth_bbox(pid, (x1, y1, x2, y2), confidence=det.get("conf", 1.0))
         resolved_pids.append((pid, x1, y1, x2, y2))
         class_flags = _classify_label(det.get("label"), det.get("cls_id"))
         if class_flags.get("is_person"):
@@ -3980,8 +4139,6 @@ def process_frame(
 
         roi_required = bool(WORK_TIMER_REQUIRE_ROI)
         roi_enabled_now = bool(roi_box)
-        # If ROI is required but ROI is not configured/enabled, fall back to counting
-        # visible person time so timer is not stuck at 00:00:00.
         if roi_required and not roi_enabled_now:
             roi_required = False
 
@@ -3990,30 +4147,7 @@ def process_frame(
         work_seconds = _update_work_timer(timer_key, ts, work_active)
         work_timer_txt = _format_timer(work_seconds)
 
-        if is_in_roi:
-            color = (0, 165, 255)
-            draw_label = f"{display_name} (IN ROI)" if name != "Unknown" else "IN ROI"
-        elif is_fire:
-            # Fire/smoke: bright orange-red
-            color = (0, 80, 255)
-            draw_label = f"🔥 {label.upper()}" if label else "FIRE"
-            if det.get("conf"):
-                draw_label += f" {det['conf']:.0%}"
-        elif is_face and det_source == "face_det":
-            # Dedicated face detection: cyan
-            color = (255, 255, 0)
-            draw_label = f"Face"
-            if det.get("conf"):
-                draw_label += f" {det['conf']:.0%}"
-        elif is_plate or det_source == "lpd":
-            # License plate: green
-            color = (0, 255, 128)
-            draw_label = f"Plate"
-            if det.get("conf"):
-                draw_label += f" {det['conf']:.0%}"
-        else:
-            color = (0, 255, 0)
-            draw_label = display_name if name != "Unknown" else ""
+        color, draw_label = _get_semantic_color_and_label(det, is_in_roi, work_seconds)
 
         cross_tag = (
             _get_cross_overlay(camera_id, alert_entity_key, ts) if is_person else None
@@ -4027,8 +4161,6 @@ def process_frame(
 
         if WORK_TIMER_ENABLE and is_person:
             draw_label = f"{draw_label} {work_timer_txt}".strip()
-
-
 
         thickness = (
             3
@@ -6002,7 +6134,7 @@ def main():
                         hw_summary = f" | HW: cpu={hw['cpu_percent']}% ram={hw['ram_percent']}% gpu={hw['gpu_util']} gmem={hw['gpu_mem']}"
 
                         logger.info(
-                            f"📈 Stats (last {int(INTERVAL)}s): detections/s={detections_per_sec:.2f}, outgoing_fps={outgoing_fps:.2f}{perf_summary}{hw_summary}"
+                            f"📈 Stats (last {int(INTERVAL)}s) [YOLO: {CURRENT_YOLO_RUNTIME.upper()}]: detections/s={detections_per_sec:.2f}, outgoing_fps={outgoing_fps:.2f}{perf_summary}{hw_summary}"
                         )
                     except Exception as e:
                         logger.warning(f"Stats reporter error: {e}")

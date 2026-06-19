@@ -326,13 +326,11 @@
 
 .af-alert-card--entering {
     animation: af-slide-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-    border-left: 3px solid #22c55e;
 }
 
 .af-alert-card--acknowledged {
     opacity: 0.5;
     background: #f8fafc;
-    border-left: 3px solid #cbd5e1;
 }
 
 .af-alert-card:hover {
