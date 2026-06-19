@@ -6,11 +6,83 @@
   <title>Secure View</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="/static/client-modern.css" />
+  <style>
+    .camera-status-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #1e2530; /* solid dark gray placeholder */
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease, background 0.3s ease, backdrop-filter 0.3s ease;
+      z-index: 10;
+    }
+    
+    .camera-status-overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    
+    .status-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+      animation: pulse 2s infinite ease-in-out;
+    }
+    
+    .status-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #f7fafc;
+    }
+    
+    .status-reason {
+      font-size: 12px;
+      color: #a0aec0;
+      margin-bottom: 10px;
+      max-width: 85%;
+      line-height: 1.4;
+    }
+    
+    .status-retry {
+      font-size: 11px;
+      color: #cbd5e0;
+      font-weight: 500;
+    }
+    
+    .frozen-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+      z-index: 5;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.05); }
+    }
+  </style>
 
 </head>
 
 <body>
   <h2>Secure View </h2>
+  <div id="cameraSummary" style="font-size: 13px; color: #9aa0a6; margin-bottom: 12px; font-weight: 500; display: flex; gap: 12px; align-items: center; background: #1a1f26; padding: 8px 12px; border-radius: 6px; border: 1px solid #2d3748; width: fit-content;">
+    Total Cameras: 4 &middot; Live: 0 &middot; Reconnecting: 0 &middot; Degraded: 0 &middot; Offline: 4
+  </div>
 
   <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
     <div id="authBadge" class="auth-badge"></div>
@@ -58,18 +130,46 @@
   <div class="camera-grid" id="cameraGrid" aria-label="CCTV camera selector">
     <div class="camera-tile" data-camera-id="1" role="button" tabindex="0">
       <video id="video1" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <canvas id="frozenCanvas1" class="frozen-canvas"></canvas>
+      <div class="camera-status-overlay" id="statusOverlay1">
+        <div class="status-icon">📷</div>
+        <div class="status-title">Camera Offline</div>
+        <div class="status-reason">Waiting for video stream</div>
+        <div class="status-retry">System will connect automatically.</div>
+      </div>
       <div class="camera-label">Camera 1</div>
     </div>
     <div class="camera-tile" data-camera-id="2" role="button" tabindex="0">
       <video id="video2" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <canvas id="frozenCanvas2" class="frozen-canvas"></canvas>
+      <div class="camera-status-overlay" id="statusOverlay2">
+        <div class="status-icon">📷</div>
+        <div class="status-title">Camera Offline</div>
+        <div class="status-reason">Waiting for video stream</div>
+        <div class="status-retry">System will connect automatically.</div>
+      </div>
       <div class="camera-label">Camera 2</div>
     </div>
     <div class="camera-tile" data-camera-id="3" role="button" tabindex="0">
       <video id="video3" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <canvas id="frozenCanvas3" class="frozen-canvas"></canvas>
+      <div class="camera-status-overlay" id="statusOverlay3">
+        <div class="status-icon">📷</div>
+        <div class="status-title">Camera Offline</div>
+        <div class="status-reason">Waiting for video stream</div>
+        <div class="status-retry">System will connect automatically.</div>
+      </div>
       <div class="camera-label">Camera 3</div>
     </div>
     <div class="camera-tile" data-camera-id="4" role="button" tabindex="0">
       <video id="video4" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+      <canvas id="frozenCanvas4" class="frozen-canvas"></canvas>
+      <div class="camera-status-overlay" id="statusOverlay4">
+        <div class="status-icon">📷</div>
+        <div class="status-title">Camera Offline</div>
+        <div class="status-reason">Waiting for video stream</div>
+        <div class="status-retry">System will connect automatically.</div>
+      </div>
       <div class="camera-label">Camera 4</div>
     </div>
   </div>
@@ -86,6 +186,13 @@
 
   <div class="focus-container" id="focusContainer">
     <video id="focusVideo" class="camera-feed" autoplay muted playsinline disablePictureInPicture></video>
+    <canvas id="focusFrozenCanvas" class="frozen-canvas"></canvas>
+    <div class="camera-status-overlay" id="focusStatusOverlay">
+      <div class="status-icon">📷</div>
+      <div class="status-title">Camera Offline</div>
+      <div class="status-reason">Waiting for video stream</div>
+      <div class="status-retry">System will connect automatically.</div>
+    </div>
   </div>
 
   <div class="focus-rules-panel" id="focusRulesPanel" style="display:none;">
@@ -1091,6 +1198,296 @@
     let selectedCameraId = 1;
     let activeCctvCameraId = null;
     let inFocusMode = false;
+
+    // Camera health status & retry state
+    window.cameraHealth = {
+      1: { status: 'OFFLINE', attempts: 0, maxAttempts: 5, timer: null, friendlyErr: 'Waiting for video stream' },
+      2: { status: 'OFFLINE', attempts: 0, maxAttempts: 5, timer: null, friendlyErr: 'Waiting for video stream' },
+      3: { status: 'OFFLINE', attempts: 0, maxAttempts: 5, timer: null, friendlyErr: 'Waiting for video stream' },
+      4: { status: 'OFFLINE', attempts: 0, maxAttempts: 5, timer: null, friendlyErr: 'Waiting for video stream' }
+    };
+
+    window.cameraStats = {
+      1: { prevPacketsReceived: 0, prevPacketsLost: 0, lastCheckTime: 0 },
+      2: { prevPacketsReceived: 0, prevPacketsLost: 0, lastCheckTime: 0 },
+      3: { prevPacketsReceived: 0, prevPacketsLost: 0, lastCheckTime: 0 },
+      4: { prevPacketsReceived: 0, prevPacketsLost: 0, lastCheckTime: 0 }
+    };
+
+    function mapFriendlyErrorMessage(rawErr) {
+      if (!rawErr) return "Waiting for video stream";
+      const errLower = rawErr.toLowerCase();
+      if (errLower.includes("timeout") || errLower.includes("time out")) {
+        return "Connection timed out";
+      }
+      if (errLower.includes("auth") || errLower.includes("credentials") || errLower.includes("password") || errLower.includes("unauthorized")) {
+        return "Invalid camera credentials";
+      }
+      if (errLower.includes("404") || errLower.includes("not found") || errLower.includes("no such")) {
+        return "Camera not found";
+      }
+      if (errLower.includes("no packets") || errLower.includes("no frame") || errLower.includes("empty")) {
+        return "Waiting for video stream";
+      }
+      return rawErr;
+    }
+
+    function freezeVideoFrame(videoEl, cameraId, isFocus = false) {
+      const canvas = isFocus ? document.getElementById('focusFrozenCanvas') : document.getElementById(`frozenCanvas${cameraId}`);
+      if (canvas && videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+        canvas.width = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        canvas.style.display = 'block';
+        videoEl.style.display = 'none';
+        return true;
+      }
+      return false;
+    }
+
+    function unfreezeVideoFrame(videoEl, cameraId, isFocus = false) {
+      const canvas = isFocus ? document.getElementById('focusFrozenCanvas') : document.getElementById(`frozenCanvas${cameraId}`);
+      if (canvas) {
+        canvas.style.display = 'none';
+      }
+      if (videoEl) {
+        videoEl.style.display = 'block';
+      }
+    }
+
+    function updateCctvDropdownOption(cameraId, status) {
+      const select = document.getElementById('cctvSelect');
+      if (!select) return;
+      const option = select.querySelector(`option[value="${cameraId}"]`);
+      if (!option) return;
+      
+      const emojiMap = {
+        LIVE: '🟢',
+        DEGRADED: '🟠',
+        RECONNECTING: '🟡',
+        OFFLINE: '🔴'
+      };
+      
+      const textMap = {
+        LIVE: `Camera ${cameraId}`,
+        DEGRADED: `Camera ${cameraId} (Degraded)`,
+        RECONNECTING: `Camera ${cameraId} (Reconnecting...)`,
+        OFFLINE: `Camera ${cameraId} (Offline)`
+      };
+      
+      const emoji = emojiMap[status] || '🔴';
+      const text = textMap[status] || `Camera ${cameraId} (Offline)`;
+      option.textContent = `${emoji} ${text}`;
+    }
+
+    function updateCameraSummaryUI() {
+      const summaryEl = document.getElementById('cameraSummary');
+      if (!summaryEl) return;
+      const healths = Object.values(window.cameraHealth);
+      const total = healths.length;
+      const live = healths.filter(h => h.status === 'LIVE').length;
+      const reconnecting = healths.filter(h => h.status === 'RECONNECTING').length;
+      const degraded = healths.filter(h => h.status === 'DEGRADED').length;
+      const offline = healths.filter(h => h.status === 'OFFLINE').length;
+      
+      summaryEl.innerHTML = `Total Cameras: ${total} &middot; <span style="color:#4cd137;">🟢 Live: ${live}</span> &middot; <span style="color:#fbc531;">🟡 Reconnecting: ${reconnecting}</span> &middot; <span style="color:#e1b12c;">🟠 Degraded: ${degraded}</span> &middot; <span style="color:#ff7675;">🔴 Offline: ${offline}</span>`;
+    }
+
+    function updateCameraStatusUI(cameraId, status, reason = "", attempt = 0, nextRetrySec = 0) {
+      const tileOverlay = document.getElementById(`statusOverlay${cameraId}`);
+      const focusOverlay = (selectedCameraId === cameraId && inFocusMode) ? document.getElementById('focusStatusOverlay') : null;
+      
+      const overlays = [tileOverlay, focusOverlay].filter(Boolean);
+      
+      // Update dropdown selector & summary
+      updateCctvDropdownOption(cameraId, status);
+      updateCameraSummaryUI();
+
+      if (status === 'LIVE') {
+        const vEl = videoEls[cameraId];
+        if (vEl) unfreezeVideoFrame(vEl, cameraId, false);
+        if (selectedCameraId === cameraId && focusVideoEl) unfreezeVideoFrame(focusVideoEl, cameraId, true);
+
+        overlays.forEach(overlay => {
+          overlay.classList.remove('show');
+        });
+        return;
+      }
+
+      let icon = "📷";
+      let title = "Camera Offline";
+      let displayReason = reason ? mapFriendlyErrorMessage(reason) : (window.cameraHealth[cameraId].friendlyErr || "Waiting for video stream");
+      let retryText = "";
+
+      if (status === 'RECONNECTING') {
+        icon = "🔄";
+        title = "Connection Lost";
+        retryText = `Attempt ${attempt}/5. Retrying in ${nextRetrySec} seconds...`;
+      } else if (status === 'DEGRADED') {
+        icon = "⚠️";
+        title = "Feed Degraded";
+        retryText = "";
+      } else if (status === 'OFFLINE') {
+        icon = "⚠️";
+        title = "Camera Offline";
+        retryText = "System will retry automatically.";
+      }
+
+      // Check if canvas has a frozen frame
+      const canvas = document.getElementById(`frozenCanvas${cameraId}`);
+      const focusCanvas = document.getElementById('focusFrozenCanvas');
+      const hasFrozenFrame = (canvas && canvas.style.display === 'block') || (selectedCameraId === cameraId && inFocusMode && focusCanvas && focusCanvas.style.display === 'block');
+
+      overlays.forEach(overlay => {
+        if (hasFrozenFrame) {
+          overlay.style.background = 'rgba(30, 37, 48, 0.85)';
+          overlay.style.backdropFilter = 'blur(4px)';
+        } else {
+          overlay.style.background = '#1e2530';
+          overlay.style.backdropFilter = 'none';
+        }
+
+        const iconEl = overlay.querySelector('.status-icon');
+        const titleEl = overlay.querySelector('.status-title');
+        const reasonEl = overlay.querySelector('.status-reason');
+        const retryEl = overlay.querySelector('.status-retry');
+
+        if (iconEl) iconEl.textContent = icon;
+        if (titleEl) titleEl.textContent = title;
+        if (reasonEl) {
+          reasonEl.innerHTML = `Reason:<br>• ${displayReason.split('\n').join('<br>• ')}`;
+        }
+        if (retryEl) {
+          retryEl.textContent = retryText;
+        }
+
+        overlay.classList.add('show');
+      });
+    }
+
+    function updateCameraStatus(cameraId, status, reason = "") {
+      const health = window.cameraHealth[cameraId];
+      if (!health) return;
+      health.status = status;
+      if (reason) {
+        health.friendlyErr = mapFriendlyErrorMessage(reason);
+      }
+      if (status === 'LIVE') {
+        health.attempts = 0;
+        if (health.timer) {
+          clearInterval(health.timer);
+          health.timer = null;
+        }
+      }
+      updateCameraStatusUI(cameraId, status, reason, health.attempts);
+    }
+
+    function handleCameraDisconnect(cameraId, type) {
+      const health = window.cameraHealth[cameraId];
+      if (health.status === 'RECONNECTING') return; // already in reconnect loop
+      
+      console.log(`Camera ${cameraId} (${type}) disconnected. Initiating reconnect...`);
+      
+      // Capture frame
+      const vEl = videoEls[cameraId];
+      if (vEl) {
+        freezeVideoFrame(vEl, cameraId, false);
+      }
+      if (type === 'focus' && focusVideoEl && cameraId === selectedCameraId) {
+        freezeVideoFrame(focusVideoEl, cameraId, true);
+      }
+
+      // Close peers safely
+      if (type === 'grid') {
+        if (gridPeers[cameraId]) {
+          try { gridPeers[cameraId].close(); } catch (e) {}
+          delete gridPeers[cameraId];
+        }
+        if (vEl) vEl.srcObject = null;
+      } else {
+        stopAnalytics();
+      }
+
+      health.status = 'RECONNECTING';
+      health.attempts += 1;
+      
+      if (health.attempts > health.maxAttempts) {
+        updateCameraStatus(cameraId, 'OFFLINE', 'Max reconnect attempts exceeded');
+        return;
+      }
+
+      let countdown = 5;
+      updateCameraStatusUI(cameraId, 'RECONNECTING', health.friendlyErr, health.attempts, countdown);
+      
+      if (health.timer) clearInterval(health.timer);
+      health.timer = setInterval(() => {
+        countdown -= 1;
+        if (countdown > 0) {
+          updateCameraStatusUI(cameraId, 'RECONNECTING', health.friendlyErr, health.attempts, countdown);
+        } else {
+          clearInterval(health.timer);
+          health.timer = null;
+          
+          if (type === 'grid' && gridRunning) {
+            startGridStream(cameraId).catch(err => {
+              health.friendlyErr = mapFriendlyErrorMessage(err.message);
+              handleCameraDisconnect(cameraId, 'grid');
+            });
+          } else if (type === 'focus' && inFocusMode && selectedCameraId === cameraId) {
+            startTestMode(cameraId).catch(err => {
+              health.friendlyErr = mapFriendlyErrorMessage(err.message);
+              handleCameraDisconnect(cameraId, 'focus');
+            });
+          }
+        }
+      }, 1000);
+    }
+
+    async function monitorWebRTCStats(cameraId, pc) {
+      if (!pc || pc.connectionState !== "connected") return;
+      try {
+        const stats = await pc.getStats();
+        let packetsReceived = 0;
+        let packetsLost = 0;
+        
+        stats.forEach(report => {
+          if (report.type === "inbound-rtp" && report.kind === "video") {
+            packetsReceived = report.packetsReceived || 0;
+            packetsLost = report.packetsLost || 0;
+          }
+        });
+        
+        const lastStats = window.cameraStats[cameraId];
+        const now = Date.now();
+        const duration = (now - lastStats.lastCheckTime) / 1000;
+        
+        if (lastStats.lastCheckTime > 0 && duration > 0) {
+          const deltaReceived = packetsReceived - lastStats.prevPacketsReceived;
+          const deltaLost = packetsLost - lastStats.prevPacketsLost;
+          const totalPackets = deltaReceived + deltaLost;
+          
+          if (totalPackets > 10) {
+            const lossFraction = deltaLost / totalPackets;
+            const health = window.cameraHealth[cameraId];
+            
+            if (lossFraction > 0.10) { // More than 10% loss
+              if (health.status === 'LIVE') {
+                updateCameraStatus(cameraId, 'DEGRADED', 'High packet loss detected (' + Math.round(lossFraction * 100) + '%)');
+              }
+            } else if (health.status === 'DEGRADED') {
+              updateCameraStatus(cameraId, 'LIVE');
+            }
+          }
+        }
+        
+        lastStats.prevPacketsReceived = packetsReceived;
+        lastStats.prevPacketsLost = packetsLost;
+        lastStats.lastCheckTime = now;
+      } catch (e) {
+        console.error("Failed to read stats for camera " + cameraId, e);
+      }
+    }
 
     // ------------------ Rules UI ------------------
     const rulesCameraSelect = document.getElementById('rulesCameraSelect');
@@ -2317,6 +2714,18 @@
       roiCanvas.style.display = "none";
       roiDisplayCanvas.style.display = "none";
       testRunning = false;
+
+      // Reset focus overlay and canvas
+      const focusStatusOverlay = document.getElementById('focusStatusOverlay');
+      if (focusStatusOverlay) focusStatusOverlay.classList.remove('show');
+      const focusCanvas = document.getElementById('focusFrozenCanvas');
+      if (focusCanvas) focusCanvas.style.display = 'none';
+
+      // Update grid status overlays
+      for (let i = 1; i <= 4; i++) {
+        updateCameraStatusUI(i, window.cameraHealth[i].status);
+      }
+
       try {
         const testBtn = document.getElementById('testBtn');
         if (testBtn) {
@@ -2342,6 +2751,9 @@
       roiDisplayCanvas.style.display = 'block';
       drawRulesOverlay();
       loadFocusRules(selectedCameraId || 1);
+
+      // Update focus status overlay
+      updateCameraStatusUI(selectedCameraId, window.cameraHealth[selectedCameraId].status);
     }
 
     function clampPan() {
@@ -2422,8 +2834,27 @@
       pcGrid.ontrack = (e) => {
         if (tileVideo) {
           tileVideo.srcObject = e.streams[0];
+          unfreezeVideoFrame(tileVideo, cameraId, false);
         }
       };
+
+      pcGrid.onconnectionstatechange = () => {
+        const state = pcGrid.connectionState;
+        console.log(`Grid Camera ${cameraId} connection state:`, state);
+        if (state === "connected") {
+          updateCameraStatus(cameraId, 'LIVE');
+        } else if (state === "disconnected" || state === "failed") {
+          handleCameraDisconnect(cameraId, 'grid');
+        }
+      };
+
+      const statsInterval = setInterval(() => {
+        if (!gridRunning || !gridPeers[cameraId] || gridPeers[cameraId].connectionState === "closed") {
+          clearInterval(statsInterval);
+          return;
+        }
+        monitorWebRTCStats(cameraId, gridPeers[cameraId]);
+      }, 3000);
 
       pcGrid.addTransceiver("video", { direction: "recvonly" });
 
@@ -2764,6 +3195,10 @@
 
     window.addEventListener('load', () => {
       ensureAuth();
+      updateCameraSummaryUI();
+      for (let i = 1; i <= 4; i++) {
+        updateCameraStatusUI(i, 'OFFLINE', 'Waiting for video stream');
+      }
     });
 
     // ------------------ Position canvases to match container/video ------------------
@@ -4057,6 +4492,9 @@
         console.log("Stream ID:", e.streams[0].id);
         if (activeVideoEl) {
           activeVideoEl.srcObject = e.streams[0];
+          if (cameraId) {
+            unfreezeVideoFrame(activeVideoEl, cameraId, true);
+          }
           setLoadingPhase('media');
           const done = () => {
             setLoadingPhase('ready');
@@ -4079,19 +4517,32 @@
           setLoadingPhase('media');
         }
         if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
-          console.log("Connection lost, stopping...");
+          console.log("Connection lost, handling disconnect...");
           setLoadingPhase('error');
           if (window.keepAliveInterval) {
             clearInterval(window.keepAliveInterval);
             window.keepAliveInterval = null;
           }
-          stopAll();
+          if (cameraId) {
+            handleCameraDisconnect(cameraId, 'focus');
+          } else {
+            stopAll();
+          }
         }
 
         if (pc.connectionState === "connected") {
           console.log("✅✅✅ WebRTC connection established!");
-          // connection established — hide overlay (if still visible)
           setLoadingPhase('media');
+          if (cameraId) {
+            updateCameraStatus(cameraId, 'LIVE');
+            const statsInterval = setInterval(() => {
+              if (!inFocusMode || !pc || pc.connectionState === "closed") {
+                clearInterval(statsInterval);
+                return;
+              }
+              monitorWebRTCStats(cameraId, pc);
+            }, 3000);
+          }
         }
       };
 

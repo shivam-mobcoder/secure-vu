@@ -2639,7 +2639,7 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                 if len(pts) >= 2:
                     arr = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
                     cv2.polylines(
-                        frame, [arr], isClosed=True, color=(255, 220, 0), thickness=2
+                        frame, [arr], isClosed=True, color=(0, 255, 255), thickness=2
                     )
                     zx, zy = pts[0]
                     zid = str(zone.get("id") or "roi")
@@ -2649,7 +2649,7 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                         (zx + 4, max(16, zy - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
-                        (255, 220, 0),
+                        (0, 255, 255),
                         2,
                     )
     except Exception:
@@ -3435,6 +3435,61 @@ def cleanup_old_pids(max_age=PID_STATE_TTL, active_pids_override=None) -> None:
 # --------------------------------------------------
 # FRAME PROCESSING (OPTIMIZED)
 # --------------------------------------------------
+def _get_semantic_color_and_label(det: dict, is_in_roi: bool, work_seconds: float = 0.0) -> tuple[tuple[int, int, int], str]:
+    is_person = bool(det.get("is_person"))
+    raw_name = det.get("name", "Unknown")
+    is_known = is_person and raw_name != "Unknown"
+    is_vehicle = bool(det.get("is_vehicle")) or det.get("label") in ["car", "truck", "bus", "motorcycle"]
+    is_fire = bool(det.get("is_fire"))
+    is_face = bool(det.get("is_face"))
+    is_plate = bool(det.get("is_plate"))
+    det_source = det.get("source")
+    
+    color = (0, 255, 0)  # Default: Green
+    draw_label = raw_name if is_known else ""
+
+    if is_person:
+        if is_known:
+            color = (255, 0, 255)  # Purple: Known Face
+            draw_label = raw_name
+        elif is_in_roi:
+            # Check loitering vs intrusion
+            if work_seconds >= 10.0:
+                color = (0, 165, 255)  # Orange: Loitering
+                draw_label = "Loitering"
+            else:
+                color = (0, 0, 255)  # Red: Intrusion
+                draw_label = "Intrusion"
+        else:
+            color = (255, 0, 0)  # Blue: Unknown Person
+            draw_label = "Unknown Person"
+    elif is_vehicle:
+        color = (255, 255, 0)  # Cyan: Vehicle
+        draw_label = (det.get("label") or "Vehicle").capitalize()
+    elif is_fire:
+        color = (0, 80, 255)  # Fire orange-red
+        draw_label = f"🔥 {det.get('label', 'FIRE').upper()}"
+    elif is_face and det_source == "face_det":
+        color = (255, 0, 255)  # Purple: Face
+        draw_label = "Face"
+    elif is_plate or det_source == "lpd":
+        color = (0, 255, 128)  # Plate
+        draw_label = "Plate"
+    else:
+        # Fallback category
+        color = (0, 255, 0)  # Green: Person/Other
+        draw_label = (det.get("label") or "Object").capitalize()
+
+    # Clean label format with confidence
+    conf = det.get("conf")
+    if conf:
+        if not draw_label:
+            draw_label = "Person" if is_person else (det.get("label") or "Object").capitalize()
+        draw_label = f"{draw_label} {conf:.0%}"
+        
+    return color, draw_label
+
+
 def _draw_det_bbox(frame, x1, y1, x2, y2, label, color, box_thickness=2):
     if DISABLE_DRAWING:
         return
@@ -3519,11 +3574,8 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
     for det in cached or []:
         try:
             x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
-            raw_name = det.get("name", "Unknown")
-            pid = det.get("pid")
             is_person = bool(det.get("is_person"))
-            entity_key = det.get("work_key") or f"pid:{pid}"
-            is_known = is_person and raw_name != "Unknown"
+            entity_key = det.get("work_key") or f"pid:{det.get('pid')}"
 
             is_in_roi = False
             if roi_box and is_person:
@@ -3532,21 +3584,13 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
                         entity_key in roi_state and "WEBROI" in roi_state[entity_key]
                     )
 
-            if is_in_roi:
-                color = (0, 165, 255)
-                draw_label = f"{raw_name} (IN ROI)" if is_known else "IN ROI"
-            elif det.get("is_fire"):
-                color = (0, 80, 255)
-                draw_label = f"\ud83d\udd25 {det.get('label', 'FIRE').upper()}"
-            elif det.get("is_face") and det.get("source") == "face_det":
-                color = (255, 255, 0)
-                draw_label = "Face"
-            elif det.get("is_plate") or det.get("source") == "lpd":
-                color = (0, 255, 128)
-                draw_label = "Plate"
-            else:
-                color = (0, 255, 0)
-                draw_label = raw_name if is_known else ""
+            work_seconds = float(det.get("work_seconds") or 0.0)
+            if WORK_TIMER_ENABLE and is_person:
+                work_key = det.get("work_key")
+                if work_key is not None:
+                    work_seconds = _peek_work_timer(str(work_key), now_ts)
+
+            color, draw_label = _get_semantic_color_and_label(det, is_in_roi, work_seconds)
 
             cross_tag = (
                 _get_cross_overlay(camera_id, entity_key, now_ts) if is_person else None
@@ -3554,11 +3598,7 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
             if cross_tag:
                 draw_label = f"{draw_label} [{cross_tag}]"
 
-            work_seconds = float(det.get("work_seconds") or 0.0)
             if WORK_TIMER_ENABLE and is_person:
-                work_key = det.get("work_key")
-                if work_key is not None:
-                    work_seconds = _peek_work_timer(str(work_key), now_ts)
                 timer_txt = _format_timer(work_seconds)
                 draw_label = f"{draw_label} {timer_txt}".strip()
 
@@ -4099,8 +4139,6 @@ def process_frame(
 
         roi_required = bool(WORK_TIMER_REQUIRE_ROI)
         roi_enabled_now = bool(roi_box)
-        # If ROI is required but ROI is not configured/enabled, fall back to counting
-        # visible person time so timer is not stuck at 00:00:00.
         if roi_required and not roi_enabled_now:
             roi_required = False
 
@@ -4109,30 +4147,7 @@ def process_frame(
         work_seconds = _update_work_timer(timer_key, ts, work_active)
         work_timer_txt = _format_timer(work_seconds)
 
-        if is_in_roi:
-            color = (0, 165, 255)
-            draw_label = f"{display_name} (IN ROI)" if name != "Unknown" else "IN ROI"
-        elif is_fire:
-            # Fire/smoke: bright orange-red
-            color = (0, 80, 255)
-            draw_label = f"🔥 {label.upper()}" if label else "FIRE"
-            if det.get("conf"):
-                draw_label += f" {det['conf']:.0%}"
-        elif is_face and det_source == "face_det":
-            # Dedicated face detection: cyan
-            color = (255, 255, 0)
-            draw_label = f"Face"
-            if det.get("conf"):
-                draw_label += f" {det['conf']:.0%}"
-        elif is_plate or det_source == "lpd":
-            # License plate: green
-            color = (0, 255, 128)
-            draw_label = f"Plate"
-            if det.get("conf"):
-                draw_label += f" {det['conf']:.0%}"
-        else:
-            color = (0, 255, 0)
-            draw_label = display_name if name != "Unknown" else ""
+        color, draw_label = _get_semantic_color_and_label(det, is_in_roi, work_seconds)
 
         cross_tag = (
             _get_cross_overlay(camera_id, alert_entity_key, ts) if is_person else None
@@ -4146,8 +4161,6 @@ def process_frame(
 
         if WORK_TIMER_ENABLE and is_person:
             draw_label = f"{draw_label} {work_timer_txt}".strip()
-
-
 
         thickness = (
             3

@@ -75,12 +75,21 @@ function formatPersonLabel(person = '') {
 
 function formatTimeAgo(isoOrFormatted) {
     try {
-        // Backend sends "2026-06-17 15:30:00" format
-        const ts = isoOrFormatted.replace(' ', 'T');
-        const diff = (Date.now() - new Date(ts).getTime()) / 1000;
-        if (diff < 10) return 'Just now';
-        if (diff < 60) return `${Math.floor(diff)}s ago`;
-        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        let ts = isoOrFormatted;
+        if (ts.includes(' ') && !ts.includes('T')) {
+            ts = ts.replace(' ', 'T');
+        }
+        const parsed = new Date(ts).getTime();
+        if (isNaN(parsed)) {
+            return isoOrFormatted;
+        }
+        const diff = (Date.now() - parsed) / 1000;
+        if (diff < 5) return 'just now';
+        if (diff < 60) return `${Math.floor(diff)} seconds ago`;
+        const mins = Math.floor(diff / 60);
+        if (mins < 60) return `${mins} minute${mins !== 1 ? 's' : ''} ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs} hour${hrs !== 1 ? 's' : ''} ago`;
         return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch {
         return isoOrFormatted;
@@ -140,11 +149,15 @@ export default function AdminFeed() {
         if (!mountedRef.current) return;
 
         const id = nextAlertId();
+        let ts = payload.timestamp;
+        if (!ts || (ts.includes(':') && !ts.includes('-') && !ts.includes('/'))) {
+            ts = new Date().toISOString();
+        }
         const newAlert = {
             id,
             person: payload.person || 'SYSTEM',
             event: payload.event || '',
-            timestamp: payload.timestamp || new Date().toLocaleTimeString(),
+            timestamp: ts,
             clip_url: payload.clip_url || payload.clipUrl || '',
             meta: payload.meta || null,
             isNew: true,
@@ -293,13 +306,63 @@ export default function AdminFeed() {
     );
 }
 
+// ── Alert Category Mappings ──────────────────────────────────────────────────
+const CATEGORY_META = {
+    KNOWN_FACE: { label: 'Known Face', color: '#a855f7', dot: '🟣' },
+    UNKNOWN_PERSON: { label: 'Unknown Person', color: '#3b82f6', dot: '🔵' },
+    INTRUSION: { label: 'Intrusion', color: '#ef4444', dot: '🔴' },
+    LOITERING: { label: 'Loitering', color: '#f97316', dot: '🟠' },
+    PERSON: { label: 'Person', color: '#10b981', dot: '🟢' },
+    VEHICLE: { label: 'Vehicle', color: '#06b6d4', dot: '🔵' },
+    ROI_MOTION: { label: 'ROI / Motion', color: '#eab308', dot: '🟡' },
+};
+
+function getAlertCategory(alert) {
+    const rawEvent = (alert.event || '').toUpperCase();
+    const rawPerson = (alert.person || '').toLowerCase();
+    
+    if (alert.person && alert.person !== 'SYSTEM' && alert.person !== 'Object' && alert.person !== 'Unknown' && !alert.person.startsWith('Person-')) {
+        return 'KNOWN_FACE';
+    }
+    if (rawEvent.includes('INTRUSION') || rawEvent.includes('LINE_CROSS') || rawEvent.includes('ZONE_ENTER') || rawEvent.includes('ZONE ENTER') || rawEvent.includes('CROSS')) {
+        return 'INTRUSION';
+    }
+    if (rawEvent.includes('LOITERING')) {
+        return 'LOITERING';
+    }
+    if (rawPerson === 'unknown' || rawPerson.startsWith('person-')) {
+        return 'UNKNOWN_PERSON';
+    }
+    if (rawEvent.includes('VEHICLE') || rawEvent.includes('CAR') || rawEvent.includes('TRUCK') || rawEvent.includes('BUS') || rawEvent.includes('MOTORCYCLE')) {
+        return 'VEHICLE';
+    }
+    if (rawPerson === 'person' || rawEvent.includes('PERSON')) {
+        return 'PERSON';
+    }
+    if (rawEvent.includes('ROI') || rawEvent.includes('MOTION')) {
+        return 'ROI_MOTION';
+    }
+    return 'PERSON';
+}
+
 // ── Alert Card ───────────────────────────────────────────────────────────────
 function AlertCard({ alert, onAcknowledge }) {
-    const { camera, eventType } = parseEventString(alert.event);
+    const category = getAlertCategory(alert);
+    const meta = CATEGORY_META[category] || CATEGORY_META.PERSON;
+    
+    const { camera } = parseEventString(alert.event);
     const personLabel = formatPersonLabel(alert.person);
-    const timeLabel = formatTimeAgo(alert.timestamp);
     const isAcknowledged = alert.acknowledged;
     const hasClip = Boolean(alert.clip_url);
+
+    const [timeLabel, setTimeLabel] = useState(() => formatTimeAgo(alert.timestamp));
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setTimeLabel(formatTimeAgo(alert.timestamp));
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [alert.timestamp]);
 
     function handleReview() {
         if (!hasClip) return;
@@ -307,41 +370,31 @@ function AlertCard({ alert, onAcknowledge }) {
     }
 
     return (
-        <div className={[
-            'af-alert-card',
-            alert.isNew ? 'af-alert-card--entering' : '',
-            isAcknowledged ? 'af-alert-card--acknowledged' : '',
-        ].filter(Boolean).join(' ')}>
-
-            {/* Badge row */}
-            <div className="af-alert-top">
-                <span className={`af-alert-badge ${isAcknowledged ? 'af-alert-badge--ack' : 'af-alert-badge--new'}`}>
-                    {isAcknowledged ? 'ACKNOWLEDGED' : 'NEW ALERT'}
+        <div 
+            className={[
+                'af-alert-card',
+                alert.isNew ? 'af-alert-card--entering' : '',
+                isAcknowledged ? 'af-alert-card--acknowledged' : '',
+            ].filter(Boolean).join(' ')}
+            style={{ borderLeft: `4px solid ${meta.color}` }}
+        >
+            <div className="af-alert-card-header" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                <span className="af-alert-dot">{meta.dot}</span>
+                <span className="af-alert-title-text" style={{ color: meta.color, fontWeight: '700', fontSize: '13px' }}>
+                    {meta.label}
                 </span>
+                {personLabel && personLabel !== 'Unknown Person' && personLabel !== 'System Event' && (
+                    <span className="af-alert-subtitle-text" style={{ fontSize: '12px', color: '#64748b' }}> ({personLabel})</span>
+                )}
             </div>
 
-            {/* Person / Title */}
-            <div className="af-alert-person">{personLabel}</div>
-
-            {/* Camera label (parsed from event string) */}
-            {camera && (
-                <div className="af-alert-camera">{camera}</div>
-            )}
-
-            {/* Event type (parsed) */}
-            {eventType && (
-                <div className="af-alert-event-type">{eventType}</div>
-            )}
-
-            {/* Time */}
-            <div className="af-alert-time">
-                <Clock size={11} />
-                {timeLabel}
+            <div className="af-alert-details-row" style={{ fontSize: '12px', color: '#475569', fontWeight: '500' }}>
+                {camera || 'Camera 1'} | {timeLabel}
             </div>
 
             {/* Actions */}
             {!isAcknowledged && (
-                <div className="af-alert-actions">
+                <div className="af-alert-actions" style={{ marginTop: '10px' }}>
                     <button
                         className="af-alert-btn af-alert-btn--primary"
                         onClick={() => onAcknowledge(alert.id)}
@@ -350,25 +403,15 @@ function AlertCard({ alert, onAcknowledge }) {
                         <CheckCircle size={13} />
                         Acknowledge
                     </button>
-                    {hasClip ? (
-                        <button
-                            className="af-alert-btn af-alert-btn--secondary"
-                            onClick={handleReview}
-                            title="Open event clip"
-                        >
-                            <PlayCircle size={13} />
-                            Review
-                        </button>
-                    ) : (
-                        <button
-                            className="af-alert-btn af-alert-btn--secondary af-alert-btn--disabled"
-                            disabled
-                            title="No clip available"
-                        >
-                            <PlayCircle size={13} />
-                            Review
-                        </button>
-                    )}
+                    <button
+                        className={`af-alert-btn af-alert-btn--secondary ${!hasClip ? 'af-alert-btn--disabled' : ''}`}
+                        onClick={handleReview}
+                        disabled={!hasClip}
+                        title={hasClip ? "Open event clip" : "No clip available"}
+                    >
+                        <PlayCircle size={13} />
+                        Review
+                    </button>
                 </div>
             )}
         </div>
