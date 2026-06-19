@@ -18,6 +18,7 @@ git checkout POC
 #   secure_cv_best.pt, face_db.npz (optional), env-template.txt (optional)
 
 bash handoff/install-from-handoff.sh
+bash scripts/download_buffalo.sh
 # Edit .env — RTSP_URL_1..4
 
 uv sync --group mlops

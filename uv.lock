@@ -1485,7 +1485,8 @@ dependencies = [
     { name = "bcrypt" },
     { name = "fastapi", extra = ["standard"] },
     { name = "insightface" },
-    { name = "onnxruntime-gpu" },
+    { name = "onnxruntime", marker = "sys_platform == 'darwin'" },
+    { name = "onnxruntime-gpu", marker = "sys_platform != 'darwin'" },
     { name = "opencv-python" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
@@ -1511,7 +1512,8 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.131.0" },
     { name = "insightface", specifier = ">=0.7.3" },
-    { name = "onnxruntime-gpu", specifier = ">=1.23.2" },
+    { name = "onnxruntime", marker = "sys_platform == 'darwin'", specifier = ">=1.23.2" },
+    { name = "onnxruntime-gpu", marker = "sys_platform != 'darwin'", specifier = ">=1.23.2" },
     { name = "opencv-python", specifier = ">=4.13.0.92" },
     { name = "pyjwt", specifier = ">=2.11.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
@@ -1550,6 +1552,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/74/a7/edce1403e05a46e59b502fae8e3350ceeac5841f8e8f1561e98562ed9b09/onnx-1.20.1-cp312-abi3-win32.whl", hash = "sha256:564c35a94811979808ab5800d9eb4f3f32c12daedba7e33ed0845f7c61ef2431", size = 16238216, upload-time = "2026-01-10T01:39:39.46Z" },
     { url = "https://files.pythonhosted.org/packages/8b/c7/8690c81200ae652ac550c1df52f89d7795e6cc941f3cb38c9ef821419e80/onnx-1.20.1-cp312-abi3-win_amd64.whl", hash = "sha256:9fe7f9a633979d50984b94bda8ceb7807403f59a341d09d19342dc544d0ca1d5", size = 16389207, upload-time = "2026-01-10T01:39:41.955Z" },
     { url = "https://files.pythonhosted.org/packages/01/a0/4fb0e6d36eaf079af366b2c1f68bafe92df6db963e2295da84388af64abc/onnx-1.20.1-cp312-abi3-win_arm64.whl", hash = "sha256:21d747348b1c8207406fa2f3e12b82f53e0d5bb3958bcd0288bd27d3cb6ebb00", size = 16344155, upload-time = "2026-01-10T01:39:45.536Z" },
+]
+
+[[package]]
+name = "onnxruntime"
+version = "1.23.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "coloredlogs", marker = "sys_platform != 'win32'" },
+    { name = "flatbuffers", marker = "sys_platform != 'win32'" },
+    { name = "numpy", marker = "sys_platform != 'win32'" },
+    { name = "packaging", marker = "sys_platform != 'win32'" },
+    { name = "protobuf", marker = "sys_platform != 'win32'" },
+    { name = "sympy", marker = "sys_platform != 'win32'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/d6/311b1afea060015b56c742f3531168c1644650767f27ef40062569960587/onnxruntime-1.23.2-cp310-cp310-macosx_13_0_arm64.whl", hash = "sha256:a7730122afe186a784660f6ec5807138bf9d792fa1df76556b27307ea9ebcbe3", size = 17195934, upload-time = "2025-10-27T23:06:14.143Z" },
+    { url = "https://files.pythonhosted.org/packages/db/db/81bf3d7cecfbfed9092b6b4052e857a769d62ed90561b410014e0aae18db/onnxruntime-1.23.2-cp310-cp310-macosx_13_0_x86_64.whl", hash = "sha256:b28740f4ecef1738ea8f807461dd541b8287d5650b5be33bca7b474e3cbd1f36", size = 19153079, upload-time = "2025-10-27T23:05:57.686Z" },
 ]
 
 [[package]]

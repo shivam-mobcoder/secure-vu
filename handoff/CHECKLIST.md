@@ -36,6 +36,7 @@ Branch: **`POC`**. Work top to bottom.
 ## Install
 
 - [ ] `uv sync --group mlops`
+- [ ] `bash scripts/download_buffalo.sh` — InsightFace buffalo_l (~325 MB)
 - [ ] TLS certs:
   ```bash
   mkdir -p certs

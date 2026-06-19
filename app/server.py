@@ -6467,6 +6467,7 @@ def main():
             password=os.getenv("DB_PASS", "StrongPassword123"),
             database=os.getenv("DB_NAME", "cctv_platform"),
             host=os.getenv("DB_HOST", "127.0.0.1"),
+            port=int(os.getenv("DB_PORT", "5432")),
             min_size=5,
             max_size=20,
         )

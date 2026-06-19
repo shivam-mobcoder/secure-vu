@@ -10,6 +10,7 @@ DB_USER = os.getenv("DB_USER", "cctv_user")
 DB_PASS = os.getenv("DB_PASS", "StrongPassword123")
 DB_NAME = os.getenv("DB_NAME", "cctv_platform")
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
 
 EMAIL = os.getenv("INVITE_EMAIL", "newmember@local")
 PASSWORD = os.getenv("INVITE_PASSWORD", "Welcome@123")
@@ -23,6 +24,7 @@ async def main():
         password=DB_PASS,
         database=DB_NAME,
         host=DB_HOST,
+        port=DB_PORT,
     )
     try:
         role = ROLE.strip().lower().replace("-", "_")

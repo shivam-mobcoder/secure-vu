@@ -10,6 +10,7 @@ DB_USER=cctv_user
 DB_PASS=REPLACE_WITH_YOUR_DB_PASSWORD
 DB_NAME=cctv_platform
 DB_HOST=127.0.0.1
+DB_PORT=5434
 
 # --- JWT (generate: python3 -c "import secrets; print(secrets.token_hex(64))") ---
 JWT_SECRET=REPLACE_WITH_SECURE_RANDOM_HEX

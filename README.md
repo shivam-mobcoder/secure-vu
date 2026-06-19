@@ -193,7 +193,7 @@ openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem \
 
 ```text
 models/yolo/secure_cv_best.pt
-pre_trained/insightface/models/buffalo_l/
+bash scripts/download_buffalo.sh   # → pre_trained/insightface/models/buffalo_l/
 ```
 
 ### 6. Frontend build

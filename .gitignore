@@ -74,3 +74,6 @@ mlruns/
 # Owner USB handoff (binaries + filled secrets — distribute offline)
 handoff/env-template.txt
 
+# Large InsightFace bundle (use scripts/download_buffalo.sh)
+pre_trained/
+
