@@ -6,15 +6,23 @@ Use this guide to set up the project on a different machine while preserving pro
 
 ## 💾 Files You MUST Move Manually
 
-These are **not** in Git (too large or sensitive). Copy via USB or secure storage:
+These are **not** in Git (too large or sensitive). Use the **`handoff/`** USB package when possible:
 
-1. **`.env`** — secrets and RTSP URLs (copy from `.env.example`)
-2. **`models/`** — YOLO weights (`secure_cv_best.pt`) and ArcFace `face_db/`
-3. **`pre_trained/`** — InsightFace buffalo_l pack
-4. **`datasets/`** — training images (if retraining)
-5. **`certs/`** — TLS certs for HTTPS/WebRTC
-6. **`recordings/`** — continuous recording segments (optional)
-7. **`mlruns/`** — MLflow experiment data (optional)
+```bash
+bash handoff/install-from-handoff.sh   # copies .pt, .npz, optional .env
+```
+
+Or copy manually:
+
+1. **`.env`** — secrets and RTSP URLs (or `handoff/env-template.txt` from owner)
+2. **`models/yolo/secure_cv_best.pt`** — from `handoff/secure_cv_best.pt`
+3. **`models/arcface/face_db/`** — optional `face_db.npz` from handoff
+4. **`pre_trained/`** — only if offline (otherwise InsightFace auto-downloads `buffalo_l`)
+5. **`datasets/`** — training images (if retraining)
+6. **`certs/`** — TLS certs for HTTPS/WebRTC
+7. **`recordings/`**, **`mlruns/`** — optional continuity data
+
+See [handoff/README-HANDOFF.md](../handoff/README-HANDOFF.md).
 
 ## 🛠️ Step-by-Step Setup on New Machine
 

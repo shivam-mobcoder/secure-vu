@@ -6,6 +6,7 @@ Operational guides for the **POC** branch. See [root README](../README.md) for q
 
 | Document | Description |
 |----------|-------------|
+| [../handoff/README-HANDOFF.md](../handoff/README-HANDOFF.md) | Owner USB handoff + install script |
 | [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | Frozen 12-minute POC demonstration script |
 | [MLFLOW.md](MLFLOW.md) | MLflow experiment and configuration tracking |
 | [CCTV_INTEGRATION_GUIDE.md](CCTV_INTEGRATION_GUIDE.md) | RTSP camera integration |

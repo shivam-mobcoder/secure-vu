@@ -1,0 +1,51 @@
+# SecureVu — What the Owner Must Supply
+# =======================================
+# Give the developer the handoff/ folder on USB or zip.
+# See USB-PACKAGE.txt for what goes on USB vs what is already in Git.
+
+## MANDATORY (server will not start without #1)
+
+1. secure_cv_best.pt
+   - Custom fine-tuned YOLO11m person detector (~40 MB)
+   - Place in handoff/secure_cv_best.pt
+   - install-from-handoff.sh copies to models/yolo/secure_cv_best.pt
+
+2. RTSP camera credentials
+   - Fill RTSP_URL_1 .. RTSP_URL_4 in .env or handoff/env-template.txt
+
+3. .env secrets (dev or production)
+   - DB_PASS, JWT_SECRET
+   - SUPER_PASSWORD, ADMIN_PASSWORD, MEMBER_PASSWORD
+   - ADMIN_CUSTOMER (client name for seed_admin.py)
+
+
+## RECOMMENDED (full demo without re-setup)
+
+4. face_db.npz
+   - Pre-enrolled demo faces
+   - handoff/face_db.npz -> models/arcface/face_db/face_db.npz
+
+5. env-template.txt
+   - Filled copy of env-template.example.txt (real passwords)
+   - DO NOT commit to Git — USB only
+
+6. Production TLS certs (non-localhost only)
+   - certs/cert.pem, certs/key.pem
+
+
+## NOT NEEDED FROM OWNER (developer installs)
+
+- Python packages (uv sync --group mlops)
+- Node packages (npm install)
+- PostgreSQL schema (migrations in repo; Docker auto-applies on fresh volume)
+- InsightFace buffalo_l (auto-downloads on first server start with internet)
+- Frontend build (npm run build)
+- MLflow container (docker compose)
+
+
+## ADVANCED MODELS (only if changing MODEL_SELECT)
+
+- models/yolo/secure_cv_best_l.pt / _x.pt
+- models/yolo/yolov8s-worldv2.pt
+- models/face/yolov8n-face.pt, models/fire/fire_smoke.pt, models/lpd/model.pt
+- models/yolo/secure_cv_best.engine (TensorRT)

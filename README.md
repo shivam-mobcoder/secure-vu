@@ -52,6 +52,7 @@ secure-vu/
 │   ├── benchmark_config.py # Threshold profile benchmarks → MLflow
 │   └── collect_stats.py    # GPU/CPU stats collector
 ├── docs/                   # Guides (see docs/README.md)
+├── handoff/                # Owner USB package + install-from-handoff.sh
 ├── docker-compose.yml      # PostgreSQL + MLflow + app
 ├── Dockerfile
 ├── pyproject.toml          # uv project config (Python 3.10)
@@ -71,6 +72,7 @@ secure-vu/
 | [docs/MLFLOW.md](docs/MLFLOW.md) | Experiment and config tracking |
 | [docs/CCTV_INTEGRATION_GUIDE.md](docs/CCTV_INTEGRATION_GUIDE.md) | RTSP camera setup |
 | [docs/DEPLOYMENT_GUIDE_SUMMARY.md](docs/DEPLOYMENT_GUIDE_SUMMARY.md) | Deployment quick reference |
+| [handoff/README-HANDOFF.md](handoff/README-HANDOFF.md) | Owner USB handoff + new developer setup |
 
 ---
 

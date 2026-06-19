@@ -1,0 +1,16 @@
+# SecureVu — USB / zip handoff package (owner → developer)
+#
+# COMMIT TO GIT (in repo):
+#   README-HANDOFF.md, CHECKLIST.md, OWNER-SUPPLIES.txt
+#   install-from-handoff.sh, env-template.example.txt, USB-PACKAGE.txt
+#
+# ADD TO USB/ZIP ONLY (never commit — gitignored):
+#   secure_cv_best.pt          (~40 MB)
+#   face_db.npz                (optional demo faces)
+#   env-template.txt           (filled secrets; copy of env-template.example.txt with real passwords)
+#
+# Developer workflow:
+#   1. git clone … && git checkout POC
+#   2. Copy USB files into handoff/
+#   3. bash handoff/install-from-handoff.sh
+#   4. Follow CHECKLIST.md

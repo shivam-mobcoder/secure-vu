@@ -71,3 +71,6 @@ tracking/*.json
 mlruns/
 *.zip
 
+# Owner USB handoff (binaries + filled secrets — distribute offline)
+handoff/env-template.txt
+
