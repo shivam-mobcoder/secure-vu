@@ -1086,7 +1086,8 @@ def enroll_face(name: str, frames: list, client_id=None):
 
 
 # --- PID bbox smoothing ---
-pid_smooth = {}  # pid -> (x1,y1,x2,y2)
+pid_smooth = {}  # key -> (x1,y1,x2,y2)
+bbox_hit_keys = {}  # key -> consecutive frame count
 pid_smooth_lock = threading.Lock()
 
 from bbox_smoother import BBoxSmoother
@@ -1099,6 +1100,8 @@ BBOX_ALPHA_MEDIUM = float(os.getenv("BBOX_ALPHA_MEDIUM", "0.55"))
 BBOX_ALPHA_LOW = float(os.getenv("BBOX_ALPHA_LOW", "0.80"))
 BBOX_CONF_HIGH = float(os.getenv("BBOX_CONF_HIGH", "0.85"))
 BBOX_CONF_MEDIUM = float(os.getenv("BBOX_CONF_MEDIUM", "0.60"))
+BBOX_JUMP_THRESH = float(os.getenv("BBOX_JUMP_THRESH", "1.5"))
+BBOX_MIN_HITS = max(1, _int_env("BBOX_MIN_HITS", 2))
 
 bbox_smoother = BBoxSmoother(
     mode=BBOX_SMOOTHING_MODE,
@@ -1107,19 +1110,44 @@ bbox_smoother = BBoxSmoother(
     alpha_medium=BBOX_ALPHA_MEDIUM,
     alpha_low=BBOX_ALPHA_LOW,
     conf_high=BBOX_CONF_HIGH,
-    conf_medium=BBOX_CONF_MEDIUM
+    conf_medium=BBOX_CONF_MEDIUM,
+    jump_thresh=BBOX_JUMP_THRESH,
 )
 
 
-def smooth_bbox(pid, box, confidence=1.0):
-    """EMA bbox smoothing delegation to BBoxSmoother."""
+def _bbox_smooth_key(pid, track_id=None) -> str:
+    if track_id is not None:
+        try:
+            return f"trk:{int(track_id)}"
+        except Exception:
+            pass
+    return f"pid:{pid}"
+
+
+def smooth_bbox(pid, box, confidence=1.0, track_id=None):
+    """EMA bbox smoothing with jump-snap; hits keyed by tracker id when available."""
+    key = _bbox_smooth_key(pid, track_id)
     with pid_smooth_lock:
-        if pid not in pid_smooth:
-            pid_smooth[pid] = box
+        bbox_hit_keys[key] = bbox_hit_keys.get(key, 0) + 1
+        if key not in pid_smooth:
+            pid_smooth[key] = box
             return box
 
-        pid_smooth[pid] = bbox_smoother.smooth(pid_smooth[pid], box, confidence)
-        return pid_smooth[pid]
+        pid_smooth[key] = bbox_smoother.smooth(pid_smooth[key], box, confidence)
+        return pid_smooth[key]
+
+
+def _bbox_ready(pid, track_id=None) -> bool:
+    key = _bbox_smooth_key(pid, track_id)
+    return bbox_hit_keys.get(key, 0) >= BBOX_MIN_HITS
+
+
+def _prune_bbox_hits(active_keys: set) -> None:
+    with pid_smooth_lock:
+        stale = [k for k in bbox_hit_keys if k not in active_keys]
+        for key in stale:
+            bbox_hit_keys.pop(key, None)
+            pid_smooth.pop(key, None)
 
 
 
@@ -2260,6 +2288,7 @@ def evaluate_camera_rules(camera_id, frame_shape, det_items: list, ts: float) ->
 # ALERT SYSTEM (USE OLD VERSION)
 # --------------------------------------------------
 alert_channels = set()
+websocket_alert_clients = set()
 last_alert_time = {}  # Per-person+event cooldown
 unknown_alert_once = {}
 unknown_alert_lock = threading.Lock()
@@ -2299,10 +2328,7 @@ def broadcast_payload(payload):
 def send_enrollment_alert(message):
     if not message:
         return
-    payload = json.dumps(
-        {"person": "SYSTEM", "event": message, "timestamp": time.strftime("%H:%M:%S")}
-    )
-    broadcast_payload(payload)
+    send_alert("SYSTEM", message)
 
 
 def send_session_guidance(session, message):
@@ -2337,8 +2363,6 @@ def send_alert(person, event, clip_url: str | None = None, meta: dict | None = N
     with recognition_log_lock:
         recognition_log.appendleft(log_entry)
 
-    if not has_active_alert_channel():
-        return
     logger.info(f"📨 Queueing alert: {person} - {event}")
     payload = {
         "person": person,
@@ -2461,6 +2485,21 @@ def _set_event_clips_enabled(enabled: bool, *, persist: bool = True) -> bool:
     if persist:
         _persist_runtime_flags()
     return bool(EVENT_CLIP_ENABLE)
+
+
+async def recent_alerts_handler(request):
+    """Return recent security alerts from the in-memory ring buffer."""
+    user = request.get("user") or {}
+    require_role(user, ["admin", "member"])
+    if AUTH_READY and can and not can(user, "alerts", "view"):
+        return web.Response(status=403)
+    try:
+        limit = min(50, max(1, int(request.query.get("limit", "20"))))
+    except Exception:
+        limit = 20
+    with recognition_log_lock:
+        items = list(recognition_log)[:limit]
+    return web.json_response({"alerts": items})
 
 
 async def event_clips_get_settings(request):
@@ -2593,13 +2632,22 @@ def _save_event_clip(job: dict, frames: list[tuple[float, bytes]]) -> None:
         pass
 
 
-def _draw_event_clip_overlays(frame, camera_id) -> None:
+def _rule_overlay_visible(item) -> bool:
+    if not isinstance(item, dict):
+        return True
+    if item.get("_visible") is False or item.get("visible") is False:
+        return False
+    if item.get("_enabled") is False or item.get("enabled") is False:
+        return False
+    return True
+
+
+def _draw_camera_rules_overlay(frame, camera_id) -> None:
     try:
         h, w = frame.shape[:2]
     except Exception:
         return
 
-    # WEB ROI (global drag ROI)
     try:
         if web_roi and bool(web_roi.get("enabled")):
             wx1 = int(float(web_roi.get("x", 0.0)) * w)
@@ -2619,7 +2667,6 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
     except Exception:
         pass
 
-    # Per-camera rules: ROI zones + virtual lines + parking zones
     try:
         rules = _get_camera_rules(camera_id)
     except Exception:
@@ -2629,6 +2676,8 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
         roi = rules.get("roi_intrusion", {})
         if roi.get("enabled"):
             for zone in roi.get("zones", []) or []:
+                if not _rule_overlay_visible(zone):
+                    continue
                 pts = []
                 for p in zone.get("points", []) or []:
                     if not isinstance(p, (list, tuple)) or len(p) < 2:
@@ -2659,6 +2708,8 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
         vlines = rules.get("virtual_lines", {})
         if vlines.get("enabled"):
             for line in vlines.get("lines", []) or []:
+                if not _rule_overlay_visible(line):
+                    continue
                 p1 = line.get("p1") or [0.1, 0.5]
                 p2 = line.get("p2") or [0.9, 0.5]
                 x1 = int(_clamp01(p1[0]) * w)
@@ -2683,6 +2734,8 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
         parking = rules.get("parking_rules", {})
         if parking.get("enabled"):
             for zone in parking.get("zones", []) or []:
+                if not _rule_overlay_visible(zone):
+                    continue
                 pts = []
                 for p in zone.get("points", []) or []:
                     if not isinstance(p, (list, tuple)) or len(p) < 2:
@@ -2708,6 +2761,19 @@ def _draw_event_clip_overlays(frame, camera_id) -> None:
                     )
     except Exception:
         pass
+
+
+def _maybe_draw_live_overlays(frame, camera_id) -> None:
+    if DISABLE_DRAWING or camera_id is None:
+        return
+    try:
+        _draw_camera_rules_overlay(frame, camera_id)
+    except Exception:
+        pass
+
+
+def _draw_event_clip_overlays(frame, camera_id) -> None:
+    _draw_camera_rules_overlay(frame, camera_id)
 
 
 def _event_clip_on_frame(camera_id, frame, ts: float) -> None:
@@ -2805,8 +2871,6 @@ def _get_cross_overlay(camera_id, entity_key: str, now_ts: float) -> str | None:
 
 def _emit_presence_alert(camera_id, det_items: list, ts: float) -> None:
     if not FEED_PRESENCE_ALERT_ENABLE:
-        return
-    if not has_active_alert_channel():
         return
 
     cam_key = _camera_key(camera_id)
@@ -3673,6 +3737,7 @@ def process_frame(
     if not should_process:
         if cs["draw_dets"]:
             _draw_cached_dets(frame, cs["draw_dets"], roi_box, camera_id)
+        _maybe_draw_live_overlays(frame, camera_id)
         try:
             _event_clip_on_frame(camera_id, frame, time.time())
         except Exception:
@@ -3958,8 +4023,10 @@ def process_frame(
                 pid = int(hash(stable_id) & 0x7FFFFFFF)
         except Exception:
             pid = i
-        x1, y1, x2, y2 = smooth_bbox(pid, (x1, y1, x2, y2), confidence=det.get("conf", 1.0))
-        resolved_pids.append((pid, x1, y1, x2, y2))
+        x1, y1, x2, y2 = smooth_bbox(
+            pid, (x1, y1, x2, y2), confidence=det.get("conf", 1.0), track_id=track_id
+        )
+        resolved_pids.append((pid, x1, y1, x2, y2, track_id))
         class_flags = _classify_label(det.get("label"), det.get("cls_id"))
         if class_flags.get("is_person"):
             person_entries.append((i, pid, x1, y1, x2, y2))
@@ -3997,8 +4064,10 @@ def process_frame(
 
 
     det_items = []
+    active_smooth_keys = set()
     for i, det in enumerate(raw_dets):
-        pid, x1, y1, x2, y2 = resolved_pids[i]
+        pid, x1, y1, x2, y2, track_id = resolved_pids[i]
+        active_smooth_keys.add(_bbox_smooth_key(pid, track_id))
         cls_id = det.get("cls_id")
         label = det.get("label")
         track_id = det.get("track_id")
@@ -4172,9 +4241,11 @@ def process_frame(
             else 2
         )
         try:
-            _draw_det_bbox(
-                frame, x1, y1, x2, y2, draw_label, color, box_thickness=thickness
-            )
+            show_box = (not is_person) or _bbox_ready(pid, track_id)
+            if show_box:
+                _draw_det_bbox(
+                    frame, x1, y1, x2, y2, draw_label, color, box_thickness=thickness
+                )
         except Exception as e:
             print(f"[DRAW] Failed to draw bounding box: {e}")
 
@@ -4197,6 +4268,7 @@ def process_frame(
         det_items.append(
             {
                 "pid": pid,
+                "track_id": track_id,
                 "box": (x1, y1, x2, y2),
                 "label": label,
                 "cls_id": cls_id,
@@ -4220,6 +4292,8 @@ def process_frame(
         with pid_tracker_op_lock:
             pid_tracker.sweep_inactive(active_track_ids)
 
+    _prune_bbox_hits(active_smooth_keys)
+
     t = log_step("draw", t)
     t_draw = time.perf_counter()
     try:
@@ -4238,9 +4312,12 @@ def process_frame(
                 "is_person": d.get("is_person"),
                 "work_seconds": d.get("work_seconds", 0.0),
                 "work_key": d.get("work_key"),
+                "track_id": d.get("track_id"),
 
             }
             for d in det_items
+            if (not d.get("is_person"))
+            or _bbox_ready(d.get("pid"), d.get("track_id"))
         ]
         cs["draw_time"] = now
     except Exception:
@@ -4294,7 +4371,25 @@ def process_frame(
             _clip_pool.submit(_event_clip_on_frame, camera_id, frame.copy(), time.time())
         except Exception:
             pass
+    _maybe_draw_live_overlays(frame, camera_id)
     return frame
+
+
+async def broadcast_alert_all(payload: str) -> int:
+    success_count = broadcast_payload(payload)
+    dead_ws = []
+    for ws in list(websocket_alert_clients):
+        try:
+            if ws.closed:
+                dead_ws.append(ws)
+                continue
+            await ws.send_str(payload)
+            success_count += 1
+        except Exception:
+            dead_ws.append(ws)
+    for ws in dead_ws:
+        websocket_alert_clients.discard(ws)
+    return success_count
 
 
 async def process_alert_queue():
@@ -4325,7 +4420,7 @@ async def process_alert_queue():
 
                 payload = json.dumps(payload_obj)
                 logger.info(f"📤 Sending queued alert: {person} - {event}")
-                success_count = broadcast_payload(payload)
+                success_count = await broadcast_alert_all(payload)
                 logger.info(f"   Result: {success_count} alert(s) sent")
                 alert_queue.task_done()
 
@@ -4627,6 +4722,11 @@ def _get_shared_cctv_camera(
     rtsp_url = _get_rtsp_url(cam_id, subtype=0)
     key = (cam_id, bool(process))
     with _shared_cctv_lock:
+        # Grid WebRTC reuses the analytics feed (boxes already drawn, one RTSP session).
+        if not process:
+            analytics = _shared_server_cameras.get((cam_id, True))
+            if analytics is not None:
+                return analytics
         cam = _shared_server_cameras.get(key)
         if cam is None:
             cam = SharedServerCamera(camera_id=cam_id, process=process)
@@ -5437,6 +5537,7 @@ async def websocket_handler(request):
         return web.Response(status=403)
     ws = web.WebSocketResponse()
     await ws.prepare(request)
+    websocket_alert_clients.add(ws)
 
     async def _process_enrollment_session(ws_id):
         """Background task: collect good frames until quality target met."""
@@ -5729,6 +5830,7 @@ async def websocket_handler(request):
         # Expected during server shutdown.
         pass
     finally:
+        websocket_alert_clients.discard(ws)
         try:
             if not ws.closed:
                 await ws.close()
@@ -6063,6 +6165,7 @@ def main():
             password=os.getenv("DB_PASS", "StrongPassword123"),
             database=os.getenv("DB_NAME", "cctv_platform"),
             host=os.getenv("DB_HOST", "127.0.0.1"),
+            port=int(os.getenv("DB_PORT", "5432")),
             min_size=5,
             max_size=20,
         )
@@ -6206,6 +6309,7 @@ def main():
     app.router.add_get("/api/face/list", face_list)
     app.router.add_post("/api/face/delete", face_delete)
     app.router.add_get("/api/face/recognition-logs", recognition_logs_handler)
+    app.router.add_get("/api/alerts/recent", recent_alerts_handler)
     app.router.add_post("/api/face/recognize", face_recognize)
     # Member Management API (Admin only)
     app.router.add_get("/api/admin/members", list_members)

@@ -1,0 +1,124 @@
+# ==========================================================
+# SecureVU — Environment Configuration (FILLED — HANDOFF COPY)
+# ==========================================================
+# Created by: Shivam Raina  |  June 2026
+# ⚠️  DO NOT commit this file to Git — contains real secrets
+
+# ── PostgreSQL ────────────────────────────────────────────
+DB_USER=cctv_user
+DB_PASS=StrongPassword123
+DB_NAME=cctv_platform
+DB_HOST=127.0.0.1
+
+# ── JWT Secret ────────────────────────────────────────────
+JWT_SECRET=8004e2a6fa29e00e6f5f427c786ff3419c8d62b3bfea165875af0b6bcd48f75a091b206bf3b4df1f7795cf74fd672b28ef9af4c8499c2b23bde27844a8548db8
+
+# ── Admin Accounts ────────────────────────────────────────
+SUPER_EMAIL=super@platform.com
+SUPER_PASSWORD=SuperAdmin@123
+
+ADMIN_EMAIL=admin@internal.com
+ADMIN_PASSWORD=AdminStrong123
+ADMIN_CUSTOMER=SecureVU_Demo
+
+MEMBER_EMAIL=member@internal.com
+MEMBER_PASSWORD=MemberStrong123
+
+# ── RTSP Camera URLs ──────────────────────────────────────
+# ⚠️  Fill in your real RTSP camera credentials below
+# Format: rtsp://username:password@ip_address:554/stream_path
+RTSP_URL_1=
+RTSP_URL_2=
+RTSP_URL_3=
+RTSP_URL_4=
+
+# ── Model Selection ───────────────────────────────────────
+# 6 = Production Mode (YOLO11m + InsightFace) — recommended
+MODEL_SELECT=6
+# Start with pytorch for first run; switch to tensorrt after building engine
+MODEL_RUNTIME=pytorch
+YOLO_WEIGHTS=models/yolo/secure_cv_best.pt
+
+# ── Inference Resolution ──────────────────────────────────
+YOLO_PROCESS_EVERY_N_FRAMES=1
+YOLO_MIN_CONF=0.20
+YOLO_INPUT_WIDTH=640
+YOLO_INPUT_HEIGHT=640
+FOCUS_YOLO_INPUT_WIDTH=1280
+FOCUS_YOLO_INPUT_HEIGHT=1280
+FOCUS_CAMERA_WIDTH=1920
+FOCUS_CAMERA_HEIGHT=1080
+
+# ── RTSP / OpenCV Stability ───────────────────────────────
+RTSP_USE_PYAV=0
+PYAV_UNSAFE_OK=0
+OPENCV_LOG_LEVEL=ERROR
+RTSP_OPEN_TIMEOUT_MS=5000
+RTSP_READ_TIMEOUT_MS=5000
+RTSP_RETRY_DELAY_SEC=1.5
+
+# ── Face Recognition ──────────────────────────────────────
+FACE_ENABLE=0
+FACE_EVERY_N_FRAMES=5
+
+# ── Work Timer ────────────────────────────────────────────
+WORK_TIMER_ENABLE=1
+WORK_TIMER_REQUIRE_ROI=0
+WORK_TIMER_STALE_SEC=20
+WORK_KEY_MAX_GAP_SEC=15.0
+WORK_KEY_MATCH_DISTANCE_PX=400
+WORK_CROSS_CAMERA_BY_NAME=1
+WORK_EMBED_REID_ENABLE=1
+WORK_EMBED_MATCH_THRESHOLD=0.50
+WORK_EMBED_ROLLING_ALPHA=0.35
+WORK_HYBRID_MOTION_WEIGHT=0.35
+WORK_HANDOFF_POOL_SEC=20
+WORK_HANDOFF_MAX_DIST_PX=260
+WORK_DEDUPE_IOU=0.65
+
+# ── Posture ───────────────────────────────────────────────
+POSTURE_ENABLE=1
+POSTURE_EVERY_N_FRAMES=3
+
+# ── Alert Policy ──────────────────────────────────────────
+ALERT_LINE_ZONE_MIN_GAP=0.30
+ALERT_KNOWN_DETECT_MIN_GAP=20
+ALERT_UNKNOWN_ONCE_TTL_SEC=3600
+FEED_PRESENCE_ALERT_ENABLE=1
+FEED_PRESENCE_ALERT_MIN_GAP=3
+FEED_NEW_PERSON_MIN_HITS=2
+FEED_NEW_PERSON_REALERT_SEC=60
+ALERT_WEBROI_MIN_GAP=0.30
+ROI_TOUCH_MARGIN_PX=6
+ROI_TOUCH_MIN_OVERLAP_PX=1
+
+# ── Event Clips ───────────────────────────────────────────
+EVENT_CLIP_ENABLE=1
+EVENT_CLIP_SECONDS=8
+EVENT_CLIP_PRE_SECONDS=6
+EVENT_CLIP_FPS=6
+EVENT_CLIP_JPEG_QUALITY=75
+EVENT_CLIP_RETENTION_HOURS=24
+EVENT_CLIP_DRAW_OVERLAYS=1
+
+# ── Specialized Models ────────────────────────────────────
+FIRE_EVERY_N_FRAMES=3
+LPD_EVERY_N_FRAMES=5
+FACE_DET_EVERY_N_FRAMES=3
+
+# ── Analytics ─────────────────────────────────────────────
+ANALYTICS_ALL_CCTV=1
+ANALYTICS_CAMERA_IDS=1,2,3,4,5
+
+# ── Performance ───────────────────────────────────────────
+DISABLE_DRAWING=0
+PID_REUSE_WINDOW=5.0
+
+# ── Bounding Box Smoothing ────────────────────────────────
+BBOX_SMOOTHING_MODE=adaptive
+BBOX_FIXED_ALPHA=0.75
+BBOX_ALPHA_HIGH=0.30
+BBOX_ALPHA_MEDIUM=0.55
+BBOX_ALPHA_LOW=0.80
+BBOX_CONF_HIGH=0.85
+BBOX_CONF_MEDIUM=0.60

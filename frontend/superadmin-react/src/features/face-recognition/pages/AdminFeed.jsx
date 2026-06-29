@@ -126,6 +126,41 @@ function nextAlertId() {
 const BACKEND = import.meta.env.VITE_BACKEND_ORIGIN || '';
 const MAX_ALERTS = 20;
 
+const ENROLLMENT_GUIDANCE_KEYWORDS = [
+    'good face captured',
+    'move closer',
+    'move slightly back',
+    'hold still',
+    'turn head',
+    'move face into frame',
+    'move your face into frame',
+    'ready for face enrollment',
+    'starting face enrollment',
+    'database reloaded',
+    'enrollment complete',
+    'follow instructions',
+    'send frames now',
+];
+
+function isDisplayableAlert(payload) {
+    const event = (payload?.event || '').toString();
+    if (!event) return false;
+    const normalized = event.toLowerCase();
+    return !ENROLLMENT_GUIDANCE_KEYWORDS.some((k) => normalized.includes(k));
+}
+
+function alertDedupeKey(payload) {
+    return `${payload?.timestamp || ''}|${payload?.person || ''}|${payload?.event || ''}`;
+}
+
+function buildAlertWsUrl(token) {
+    const origin = BACKEND || window.location.origin;
+    const url = new URL('/ws', origin);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.searchParams.set('token', token);
+    return url.toString();
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function AdminFeed() {
     const iframeRef = useRef(null);
@@ -137,6 +172,8 @@ export default function AdminFeed() {
     const alertsRef = useRef([]);
     const ackedIds = useRef(loadAckedIds());
     const mountedRef = useRef(true);
+    const seenAlertKeysRef = useRef(new Set());
+    const [wsStatus, setWsStatus] = useState('connecting');
 
     // Build iframe URL
     const token = getStoredToken();
@@ -146,7 +183,15 @@ export default function AdminFeed() {
 
     // ── Alert ingestion (called from postMessage listener) ────────────────
     const ingestAlert = useCallback((payload) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || !payload) return;
+        if (!isDisplayableAlert(payload)) return;
+
+        const dedupeKey = alertDedupeKey(payload);
+        if (seenAlertKeysRef.current.has(dedupeKey)) return;
+        seenAlertKeysRef.current.add(dedupeKey);
+        if (seenAlertKeysRef.current.size > 500) {
+            seenAlertKeysRef.current = new Set([...seenAlertKeysRef.current].slice(-250));
+        }
 
         const id = nextAlertId();
         let ts = payload.timestamp;
@@ -185,13 +230,99 @@ export default function AdminFeed() {
         setAlerts([...alertsRef.current]);
     }, []);
 
+    // ── Direct WebSocket to backend (primary alert channel) ───────────────
+    useEffect(() => {
+        if (!token) {
+            setWsStatus('offline');
+            return undefined;
+        }
+
+        let ws = null;
+        let reconnectTimer = null;
+        let closed = false;
+
+        function connect() {
+            if (closed) return;
+            setWsStatus('connecting');
+            try {
+                ws = new WebSocket(buildAlertWsUrl(token));
+            } catch {
+                setWsStatus('reconnecting');
+                reconnectTimer = setTimeout(connect, 2000);
+                return;
+            }
+
+            ws.onopen = () => {
+                if (!closed) setWsStatus('connected');
+            };
+
+            ws.onmessage = (evt) => {
+                try {
+                    const data = JSON.parse(evt.data);
+                    if (data && data.event && data.person && !data.action) {
+                        ingestAlert(data);
+                    }
+                } catch {
+                    // ignore non-JSON frames
+                }
+            };
+
+            ws.onclose = () => {
+                if (closed) return;
+                setWsStatus('reconnecting');
+                reconnectTimer = setTimeout(connect, 2000);
+            };
+
+            ws.onerror = () => {
+                try { ws?.close(); } catch { /* ignore */ }
+            };
+        }
+
+        connect();
+
+        return () => {
+            closed = true;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            try { ws?.close(); } catch { /* ignore */ }
+        };
+    }, [token, ingestAlert]);
+
+    // ── REST polling fallback (catches alerts if WebSocket drops) ─────────
+    useEffect(() => {
+        if (!token) return undefined;
+
+        let cancelled = false;
+
+        async function pollRecentAlerts() {
+            try {
+                const res = await fetch(`${BACKEND}/api/alerts/recent?limit=20`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok || cancelled) return;
+                const body = await res.json();
+                const items = Array.isArray(body?.alerts) ? body.alerts : [];
+                for (let i = items.length - 1; i >= 0; i -= 1) {
+                    ingestAlert(items[i]);
+                }
+            } catch {
+                // ignore transient network errors
+            }
+        }
+
+        pollRecentAlerts();
+        const interval = setInterval(pollRecentAlerts, 5000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [token, ingestAlert]);
+
     // ── Listen for alerts forwarded from the iframe via postMessage ────────
     useEffect(() => {
         mountedRef.current = true;
 
         function onMessage(evt) {
             if (!mountedRef.current) return;
-            // Only accept SECUREVU_ALERT messages (ignore other postMessage noise)
             if (!evt.data || evt.data.type !== 'SECUREVU_ALERT') return;
             const payload = evt.data.payload;
             if (!payload) return;
@@ -261,8 +392,14 @@ export default function AdminFeed() {
                     <div className="af-alerts-header-left">
                         <h2 className="af-alerts-title">Security Alerts</h2>
                         <div className="af-alerts-status">
-                            <span className="af-status-dot af-status-dot--live" />
-                            <span className="af-alerts-subtitle">Live Monitoring</span>
+                            <span className={`af-status-dot ${wsStatus === 'connected' ? 'af-status-dot--live' : ''}`} />
+                            <span className="af-alerts-subtitle">
+                                {wsStatus === 'connected'
+                                    ? 'Live Monitoring'
+                                    : wsStatus === 'connecting'
+                                        ? 'Connecting…'
+                                        : 'Reconnecting…'}
+                            </span>
                         </div>
                     </div>
                     <div className="af-alerts-actions">

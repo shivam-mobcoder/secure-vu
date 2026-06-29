@@ -3061,6 +3061,13 @@
     }
 
     function handleMessage(data) {
+      if (data && data.event && data.person && !data.action) {
+        processServerAlert(data);
+        if (shouldDisplayAlert(data)) {
+          addAlert(data);
+        }
+        return;
+      }
       if (data.action === 'list_faces') {
         const faces = data.faces;
         if (faces.length === 0) {
@@ -4682,12 +4689,17 @@
       // ── Forward alert to React parent (sidebar) via postMessage ──
       try {
         if (window.parent && window.parent !== window) {
+          const targetOrigin = window.location.origin || '*';
           window.parent.postMessage({
             type: 'SECUREVU_ALERT',
             payload: { person, event, timestamp, clip_url: clipUrl }
-          }, '*');
+          }, targetOrigin);
         }
       } catch (e) { /* ignore cross-origin postMessage errors */ }
+
+      if (!alertsDiv) {
+        return;
+      }
 
       const div = document.createElement("div");
       div.className = "alert-item";

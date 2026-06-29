@@ -1,0 +1,51 @@
+# SecureVU — What the Owner Must Supply
+# =======================================
+# Give this list to the new developer along with the handoff folder.
+# These items CANNOT be auto-downloaded or generated — they come from you.
+
+## MANDATORY (server will not start without these)
+
+1. models/yolo/secure_cv_best.pt
+   - Your custom fine-tuned YOLO11m person detection model
+   - Place at: <repo_root>/models/yolo/secure_cv_best.pt
+
+2. RTSP camera credentials
+   - Camera usernames, passwords, IP addresses
+   - Fill into the .env file as RTSP_URL_1, RTSP_URL_2, etc.
+
+3. .env secrets
+   - DB_PASS: your chosen PostgreSQL password
+   - JWT_SECRET: random 64-byte hex (can generate: python3 -c "import secrets; print(secrets.token_hex(64))")
+   - Account passwords: SUPER_PASSWORD, ADMIN_PASSWORD, MEMBER_PASSWORD
+
+
+## RECOMMENDED (not required to boot, but needed for full demo)
+
+4. models/arcface/face_db/face_db.npz
+   - Pre-enrolled face database (optional — can re-enroll in UI)
+   - If you have demo faces enrolled, copy this file so they don't need to re-enroll
+
+5. Production TLS certificates (for non-localhost deployment)
+   - certs/cert.pem
+   - certs/key.pem
+   - For local dev, the developer can self-sign (instructions in README-HANDOFF.md)
+
+
+## ONLY IF USING ADVANCED MODES
+
+6. models/yolo/secure_cv_best_l.pt   → for MODEL_SELECT=9,11
+7. models/yolo/secure_cv_best_x.pt   → for MODEL_SELECT=10,12
+8. models/face/yolov8n-face.pt       → for MODEL_SELECT=2,5,7,11,12
+9. models/fire/fire_smoke.pt          → for MODEL_SELECT=3,5,7,11,12
+10. models/lpd/model.pt               → for MODEL_SELECT=4,5,7,11,12
+11. models/yolo/secure_cv_best.engine → for MODEL_RUNTIME=tensorrt
+
+
+## NOT NEEDED FROM OWNER (auto-installed)
+
+- Python packages (uv sync)
+- Node packages (npm install)
+- PostgreSQL (Docker)
+- InsightFace buffalo_l model (auto-downloads on first run with internet)
+- Database schema (auto-applied by Docker / migration SQL in repo)
+- Frontend build (npm run build)

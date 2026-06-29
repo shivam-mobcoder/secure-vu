@@ -1,31 +1,55 @@
-# � SecureVu — AI-Powered CCTV Surveillance Platform
+# SecureVu — AI-Powered CCTV Surveillance Platform
 
-Real-time person detection, face recognition, and rule-based alerting using **YOLOv8**, **ArcFace (InsightFace)**, and **WebRTC** — all served over a single HTTPS endpoint.
+Real-time person detection, face recognition, and rule-based alerting using **YOLO11m**, **ArcFace (InsightFace)**, and **WebRTC** — all served over a single HTTPS endpoint.
 
 ---
 
-## ✨ Features
+## Quick Start (Local GPU)
+
+```bash
+uv sync
+cp .env.example .env          # edit DB, JWT, RTSP URLs
+docker compose up -d db
+./scripts/run_local_gpu.sh    # backend → https://localhost:8000
+
+# separate terminal:
+cd frontend/superadmin-react && npm install && npm run dev   # → http://localhost:5173
+```
+
+### Two SecureVU copies on this machine
+
+| Project | Port | Start |
+|---------|------|-------|
+| **This repo** (`object-detection-main`) | **8000** | `./scripts/run_local_gpu.sh` |
+| POC copy (`Desktop/POC_FInal/POC-SecureVU-updated-gpu`) | **8004** | `./scripts/run_gpu.sh` |
+
+Run **only one at a time** — both share GPU and RTSP cameras.
+
+---
+
+## Features
 
 | Feature | Details |
 |---------|---------|
-| **Real-time Detection** | YOLOv8 single-class person model with optional multi-class support |
+| **Real-time Detection** | YOLO11m single-class person model (TensorRT FP16 on GPU) |
 | **Face Recognition** | ArcFace / InsightFace with per-client scoped face databases |
-| **Persistent Tracking** | ByteTrack + EMA smoothing for stable, flicker-free bounding boxes |
+| **Persistent Tracking** | ByteTrack + EMA smoothing + min-hit gating for stable boxes |
 | **Work Timers** | Per-person timers with cross-camera handoff via face embeddings |
 | **ROI / Zone / Line Rules** | Configurable intrusion zones, virtual lines, parking rules |
 | **Event Clips** | Automatic MP4 clip capture on rule violations |
-| **WebRTC Streaming** | Ultra low-latency HD video (1280×720 @ 30 fps) |
+| **WebRTC Streaming** | Low-latency video — 960×540 grid / 1280×720 focus @ 24 fps |
 | **Multi-tenant RBAC** | Super Admin → Admin → Member role hierarchy with JWT auth |
 | **React Dashboard** | Modern Vite + React SPA for all user roles |
 
 ---
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```text
 secure-vu/
 ├── app/                        # Backend (Python / aiohttp)
 │   ├── server.py               # Main server — routes, WebRTC, YOLO, drawing
+│   ├── bbox_smoother.py        # EMA + jump-snap bounding-box stabilizer
 │   ├── db.py                   # Async PostgreSQL (asyncpg)
 │   ├── auth.py                 # JWT token creation & validation
 │   ├── rbac.py                 # Role-based access control
@@ -44,7 +68,9 @@ secure-vu/
 ├── certs/                      # Self-signed TLS certs for HTTPS/WebRTC
 ├── config/                     # Runtime flags (JSON, auto-generated)
 ├── static/                     # Legacy HTML client
-├── scripts/                    # Utility / test scripts
+├── scripts/
+│   ├── run_local_gpu.sh        # Start this project on GPU (port 8000)
+│   └── ...                     # Benchmarks, training, utilities
 ├── docker-compose.yml          # Full-stack orchestration (DB + App)
 ├── Dockerfile                  # App container
 ├── pyproject.toml              # Python project & uv config
@@ -53,7 +79,7 @@ secure-vu/
 
 ---
 
-## 📋 Prerequisites
+## Prerequisites
 
 | Tool | Version | Purpose |
 |------|---------|---------|
@@ -66,7 +92,7 @@ secure-vu/
 
 ---
 
-## 🚀 Setup from Scratch (Local Development)
+## Setup from Scratch (Local Development)
 
 ### Step 1 — Clone the Repository
 
@@ -89,6 +115,7 @@ DB_USER=<your-db-user>
 DB_PASS=<your-db-password>
 DB_NAME=cctv_platform
 DB_HOST=127.0.0.1
+DB_PORT=5434
 
 # JWT Secret — generate with: python -c "import secrets; print(secrets.token_hex(64))"
 JWT_SECRET=<your-random-64-byte-hex>
@@ -119,7 +146,7 @@ Ensure PostgreSQL 15+ is running on `localhost:5432`.
 ### Step 4 — Run Database Migrations
 
 ```bash
-psql -h 127.0.0.1 -U cctv_user -d cctv_platform -f migrations/001_init.sql
+psql -h 127.0.0.1 -p 5434 -U cctv_user -d cctv_platform -f migrations/001_init.sql
 ```
 
 > **Note:** If using Docker Compose, the migration runs automatically on the first `docker-compose up` via the `docker-entrypoint-initdb.d` mount. You only need to run this manually for a standalone Postgres instance.
@@ -178,15 +205,17 @@ cd ../..
 ### Step 9 — Start the Server
 
 ```bash
-uv run python app/server.py
+./scripts/run_local_gpu.sh
+# or: uv run python app/server.py
 ```
 
-The server starts on `https://localhost:8000` by default.
+The server starts on `https://localhost:8000` by default (`PORT` in `.env`).
 
 ### Step 10 — Access the Application
 
 | URL | Purpose |
 |-----|---------|
+| `http://localhost:5173` | React dashboard (dev) |
 | `https://localhost:8000` | Landing page (Login / Signup) |
 | `https://localhost:8000/admin/dashboard` | Admin dashboard |
 | `https://localhost:8000/super-admin/dashboard` | Super Admin dashboard |
@@ -195,7 +224,7 @@ The server starts on `https://localhost:8000` by default.
 
 ---
 
-## ⚡ Quick Start (Docker — Full Stack)
+## Quick Start (Docker — Full Stack)
 
 If you just want everything running with one command:
 
@@ -207,42 +236,58 @@ This starts both `db` (PostgreSQL) and `app` (Python server). Migrations run aut
 
 ---
 
-## 🔄 Frontend Development (Hot Reload)
+## Frontend Development (Hot Reload)
 
 For frontend development with hot reload:
 
 ```bash
-# Terminal 1 — Backend
-uv run python app/server.py
+# Terminal 1 — Backend (GPU)
+./scripts/run_local_gpu.sh
 
 # Terminal 2 — Vite dev server (proxies API calls to backend)
 cd frontend/superadmin-react
 npm run dev
 ```
 
-The Vite dev server runs on `https://localhost:5174` and proxies `/offer`, `/ws`, `/api/*` to the backend.
+The Vite dev server runs on `http://localhost:5173` and proxies `/offer`, `/ws`, `/api/*` to the backend.
 
 ---
 
-## ⚙️ Key Configuration
+## Key Configuration
 
-### Detection & Tracking Tuning
+### Latency & streaming (fix laggy feed)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `YOLO_MIN_CONF` | `0.25` | Minimum YOLO detection confidence |
-| `YOLO_PROCESS_EVERY_N_FRAMES` | `1` | Process every Nth frame (1 = every frame) |
-| `YOLO_INPUT_WIDTH` / `HEIGHT` | `1280` | YOLO inference resolution |
-| `FACE_EVERY_N_FRAMES` | `5` | Run face recognition every Nth frame |
-| `BBOX_SMOOTH_ALPHA` | `0.75` | EMA smoothing weight (higher = smoother) |
-| `BBOX_JUMP_THRESH` | `1.5` | Jump snap threshold (prevents sliding on ID swaps) |
+| `GRID_CAMERA_WIDTH` / `HEIGHT` | `960` / `540` | Grid view output resolution (lower = smoother) |
+| `FOCUS_CAMERA_WIDTH` / `HEIGHT` | `1280` / `720` | Focus view output resolution |
+| `SERVER_CAMERA_FPS` | `24` | Focus stream target fps |
+| `GRID_CAMERA_FPS` | `24` | Grid stream target fps |
+| `PROCESSING_FPS` | `24` | Analytics processing cap |
+| `WEBRTC_VIDEO_KBPS` | `4500` | WebRTC encoder bitrate |
+| `ANALYTICS_CAMERA_IDS` | `1,2,3,4` | Background analytics cameras (fewer = less GPU) |
+
+### Detection & tracking (accuracy + stable boxes)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `YOLO_INPUT_WIDTH` / `HEIGHT` | `960` | YOLO inference resolution |
+| `FOCUS_YOLO_INPUT_WIDTH` / `HEIGHT` | `960` | Focus-view inference resolution |
+| `YOLO_MIN_CONF` | `0.28` | Minimum detection confidence |
+| `YOLO_PROCESS_EVERY_N_FRAMES` | `1` | Run YOLO every Nth frame |
+| `YOLO_DET_PERSIST_SECONDS` | `2.5` | Keep cached boxes between frames |
+| `BBOX_SMOOTHING_MODE` | `fixed` | `fixed` or `adaptive` EMA smoothing |
+| `BBOX_FIXED_ALPHA` | `0.85` | Smoothing weight (higher = less flicker) |
+| `BBOX_JUMP_THRESH` | `1.5` | Snap on large jumps (prevents sliding on ID swaps) |
+| `BBOX_MIN_HITS` | `2` | Frames before a new box is shown |
+| `FACE_EVERY_N_FRAMES` | `5` | Face recognition cadence |
 
 ### ByteTrack Parameters
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BT_MATCH_THRESH` | `0.85` | IoU matching threshold for track association |
-| `BT_TRACK_BUFFER` | `90` | Frames to keep lost tracks alive |
+| `BT_MATCH_THRESH` | `0.88` | IoU matching threshold for track association |
+| `BT_TRACK_BUFFER` | `120` | Frames to keep lost tracks alive |
 | `BT_TRACK_HIGH_THRESH` | `0.35` | Confidence to create new tracks |
 | `BT_TRACK_LOW_THRESH` | `0.15` | Confidence floor for rescue pool |
 
@@ -251,10 +296,9 @@ The Vite dev server runs on `https://localhost:5174` and proxies `/offer`, `/ws`
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HOST` | `0.0.0.0` | Bind address |
-| `PORT` | `8000` | Bind port |
-| `SERVER_CAMERA_FPS` | `30` | Target FPS for focus view |
-| `GRID_CAMERA_FPS` | `30` | Target FPS for grid view |
-| `WEBRTC_VIDEO_KBPS` | `6000` | WebRTC video bitrate (kbps) |
+| `PORT` | `8000` | HTTP/HTTPS bind port |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `WEBRTC_VIDEO_KBPS` | `4500` | WebRTC video bitrate (kbps) |
 
 ### Work Timer & Alerts
 
@@ -267,7 +311,7 @@ The Vite dev server runs on `https://localhost:5174` and proxies `/offer`, `/ws`
 
 ---
 
-## 🔧 Maintenance
+## Maintenance
 
 | Task | Command |
 |------|---------|
@@ -280,6 +324,6 @@ The Vite dev server runs on `https://localhost:5174` and proxies `/offer`, `/ws`
 
 ---
 
-## 📝 License
+## License
 
 **Proprietary** — Internal use only for SecureVu project.
