@@ -1,0 +1,14 @@
+[2026-06-30 15:00:13] ========================================================================
+[2026-06-30 15:00:13]   SECURE CV — YOLO11l TRAINING (same recipe as 11x)
+[2026-06-30 15:00:13] ========================================================================
+[2026-06-30 15:00:13]    train: 1905 images
+[2026-06-30 15:00:13]    valid: 181 images
+[2026-06-30 15:00:13]     test: 92 images
+[2026-06-30 15:00:15] Loading base model: yolo11l.pt (auto-downloads if missing)
+[2026-06-30 15:00:37] Training @ imgsz=960, batch=4
+[2026-06-30 18:13:31] Training finished in 3h 13m 18s
+[2026-06-30 18:13:31] Best weights saved to /media/mobcoder/195793ad-ecf9-4b47-b215-f1ce6baf74de/Downloads/object-detection-main/models/yolo/secure_cv_best_l.pt
+[2026-06-30 18:13:31] Next: uv run scripts/export_engine.py --weights models/yolo/secure_cv_best_l.pt --imgsz 960
+[2026-06-30 18:13:31] Then set MODEL_SELECT=9 in .env and restart the server.
+
+Log: /media/mobcoder/195793ad-ecf9-4b47-b215-f1ce6baf74de/Downloads/object-detection-main/training_log_11l.txt

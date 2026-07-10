@@ -70,6 +70,17 @@
       z-index: 5;
     }
 
+    .grid-preview-feed {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 8;
+      display: none;
+      background: #000;
+    }
+
     @keyframes pulse {
       0%, 100% { opacity: 0.8; transform: scale(1); }
       50% { opacity: 1; transform: scale(1.05); }
@@ -950,6 +961,23 @@
       return resp;
     }
 
+    async function setServerViewMode(mode, cameraId = null) {
+      try {
+        const body = { mode };
+        if (cameraId != null) body.camera_id = Number(cameraId);
+        const resp = await apiFetch('/api/view-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+          console.warn('setServerViewMode failed', resp.status);
+        }
+      } catch (e) {
+        console.warn('setServerViewMode error', e);
+      }
+    }
+
     async function fetchMe() {
       const resp = await apiFetch('/me');
       if (!resp.ok) throw new Error('Auth check failed');
@@ -1303,6 +1331,11 @@
       // Update dropdown selector & summary
       updateCctvDropdownOption(cameraId, status);
       updateCameraSummaryUI();
+
+      // Grid mode: never cover live preview tiles with blocking offline/degraded overlays.
+      if (gridRunning && !inFocusMode && status !== 'LIVE') {
+        return;
+      }
 
       if (status === 'LIVE') {
         const vEl = videoEls[cameraId];
@@ -2651,6 +2684,15 @@
       });
     }
     let gridPeers = {};
+    let gridPreviewTimers = {};
+    let gridPreviewStartTimers = {};
+    const gridPreviewInFlight = {};
+    const gridPreviewPending = {};
+    const gridPreviewFailCount = {};
+    const GRID_PREVIEW_MS = 400;
+    const GRID_PREVIEW_STAGGER_MS = 100;
+    const GRID_PREVIEW_TIMEOUT_MS = 10000;
+    const GRID_PREVIEW_RETRY_MS = 180;
     let gridRunning = false;
     let zoomLevel = 1;
     let panX = 0;
@@ -2720,6 +2762,19 @@
       if (focusStatusOverlay) focusStatusOverlay.classList.remove('show');
       const focusCanvas = document.getElementById('focusFrozenCanvas');
       if (focusCanvas) focusCanvas.style.display = 'none';
+
+      // Clear stale WebRTC freeze layers that can mask JPEG previews on cam 1/2
+      for (let i = 1; i <= 4; i += 1) {
+        clearTileOverlays(i);
+        const video = videoEls[i];
+        if (video) {
+          video.style.display = 'block';
+          if (video.srcObject) {
+            try { video.srcObject.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+            video.srcObject = null;
+          }
+        }
+      }
 
       // Update grid status overlays
       for (let i = 1; i <= 4; i++) {
@@ -2821,92 +2876,195 @@
       await startTestMode(selectedCameraId);
     }
 
-    async function startGridStream(cameraId) {
-      const pcGrid = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        bundlePolicy: "max-bundle",
-        rtcpMuxPolicy: "require",
-        sdpSemantics: "unified-plan",
-        encodedInsertableStreams: false
-      });
+    function clearTileOverlays(cameraId) {
+      const canvas = document.getElementById(`frozenCanvas${cameraId}`);
+      if (canvas) canvas.style.display = 'none';
+      const overlay = document.getElementById(`statusOverlay${cameraId}`);
+      if (overlay) overlay.classList.remove('show');
+    }
 
-      const tileVideo = videoEls[cameraId];
-      pcGrid.ontrack = (e) => {
-        if (tileVideo) {
-          tileVideo.srcObject = e.streams[0];
-          unfreezeVideoFrame(tileVideo, cameraId, false);
-        }
-      };
+    function getGridPreviewImg(cameraId) {
+      let img = document.getElementById(`gridPreview${cameraId}`);
+      if (img) return img;
+      const tile = document.querySelector(`.camera-tile[data-camera-id="${cameraId}"]`);
+      const video = videoEls[cameraId];
+      if (!tile || !video) return null;
+      img = document.createElement('img');
+      img.id = `gridPreview${cameraId}`;
+      img.className = 'camera-feed grid-preview-feed';
+      img.alt = `Camera ${cameraId} preview`;
+      tile.insertBefore(img, video);
+      return img;
+    }
 
-      pcGrid.onconnectionstatechange = () => {
-        const state = pcGrid.connectionState;
-        console.log(`Grid Camera ${cameraId} connection state:`, state);
-        if (state === "connected") {
-          updateCameraStatus(cameraId, 'LIVE');
-        } else if (state === "disconnected" || state === "failed") {
-          handleCameraDisconnect(cameraId, 'grid');
-        }
-      };
+    function hideGridTileOverlay(cameraId) {
+      const overlay = document.getElementById(`statusOverlay${cameraId}`);
+      if (overlay) overlay.classList.remove('show');
+    }
 
-      const statsInterval = setInterval(() => {
-        if (!gridRunning || !gridPeers[cameraId] || gridPeers[cameraId].connectionState === "closed") {
-          clearInterval(statsInterval);
+    function scheduleGridPreviewRetry(cameraId, delayMs = GRID_PREVIEW_RETRY_MS) {
+      if (!gridRunning) return;
+      setTimeout(() => {
+        if (!gridRunning) return;
+        refreshGridPreview(cameraId);
+      }, delayMs);
+    }
+
+    async function refreshGridPreview(cameraId) {
+      if (!gridRunning) return;
+      if (gridPreviewInFlight[cameraId]) {
+        gridPreviewPending[cameraId] = true;
+        return;
+      }
+      const img = getGridPreviewImg(cameraId);
+      const video = videoEls[cameraId];
+      if (!img || !authToken) return;
+      clearTileOverlays(cameraId);
+      hideGridTileOverlay(cameraId);
+      const url = `/api/cameras/${cameraId}/preview.jpg?token=${encodeURIComponent(authToken)}&_=${Date.now()}`;
+      gridPreviewInFlight[cameraId] = true;
+      let timedOut = false;
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        gridPreviewInFlight[cameraId] = false;
+        scheduleGridPreviewRetry(cameraId, 250);
+      }, GRID_PREVIEW_TIMEOUT_MS);
+      try {
+        const resp = await apiFetch(url);
+        if (!resp.ok) {
+          gridPreviewFailCount[cameraId] = (gridPreviewFailCount[cameraId] || 0) + 1;
+          hideGridTileOverlay(cameraId);
+          scheduleGridPreviewRetry(cameraId);
           return;
         }
-        monitorWebRTCStats(cameraId, gridPeers[cameraId]);
-      }, 3000);
-
-      pcGrid.addTransceiver("video", { direction: "recvonly" });
-
-      const offer = await pcGrid.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: true });
-      await pcGrid.setLocalDescription(offer);
-
-      const resp = await apiFetch("/offer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sdp: pcGrid.localDescription.sdp,
-          type: pcGrid.localDescription.type,
-          mode: "grid",
-          source: "cctv",
-          cameraId: cameraId,
-          analysis: false
-        })
-      });
-
-      if (!resp.ok) {
-        const errorText = await resp.text();
-        throw new Error(`Grid stream failed for camera ${cameraId}: ${errorText}`);
+        const blob = await resp.blob();
+        if (!blob.size) {
+          scheduleGridPreviewRetry(cameraId);
+          return;
+        }
+        if (timedOut || !gridRunning) return;
+        if (img._lastObjUrl) {
+          try { URL.revokeObjectURL(img._lastObjUrl); } catch (e) { /* ignore */ }
+        }
+        const objUrl = URL.createObjectURL(blob);
+        img._lastObjUrl = objUrl;
+        img.src = objUrl;
+        img.style.display = 'block';
+        if (video) {
+          video.style.display = 'none';
+          if (video.srcObject) {
+            try { video.srcObject.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+            video.srcObject = null;
+          }
+        }
+        clearTileOverlays(cameraId);
+        hideGridTileOverlay(cameraId);
+        gridPreviewFailCount[cameraId] = 0;
+        updateCameraStatus(cameraId, 'LIVE');
+      } catch (e) {
+        gridPreviewFailCount[cameraId] = (gridPreviewFailCount[cameraId] || 0) + 1;
+        hideGridTileOverlay(cameraId);
+        scheduleGridPreviewRetry(cameraId);
+        if (gridPreviewFailCount[cameraId] % 10 === 0) {
+          console.warn(`Grid preview camera ${cameraId} failing (${gridPreviewFailCount[cameraId]}x)`, e);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (!timedOut) {
+          gridPreviewInFlight[cameraId] = false;
+        }
+        if (gridPreviewPending[cameraId]) {
+          gridPreviewPending[cameraId] = false;
+          scheduleGridPreviewRetry(cameraId, 60);
+        }
       }
+    }
 
-      const answer = await resp.json();
-      await pcGrid.setRemoteDescription(answer);
-      gridPeers[cameraId] = pcGrid;
+    function startGridPreview(cameraId) {
+      if (gridPreviewStartTimers[cameraId]) {
+        clearTimeout(gridPreviewStartTimers[cameraId]);
+        delete gridPreviewStartTimers[cameraId];
+      }
+      if (gridPreviewTimers[cameraId]) {
+        clearInterval(gridPreviewTimers[cameraId]);
+        delete gridPreviewTimers[cameraId];
+      }
+      gridPreviewInFlight[cameraId] = false;
+      gridPreviewPending[cameraId] = false;
+      gridPreviewFailCount[cameraId] = 0;
+      const phase = (Number(cameraId) - 1) * GRID_PREVIEW_STAGGER_MS;
+      const begin = () => {
+        if (!gridRunning) return;
+        hideGridTileOverlay(cameraId);
+        refreshGridPreview(cameraId);
+        gridPreviewTimers[cameraId] = setInterval(
+          () => refreshGridPreview(cameraId),
+          GRID_PREVIEW_MS
+        );
+      };
+      if (phase > 0) {
+        gridPreviewStartTimers[cameraId] = setTimeout(begin, phase);
+      } else {
+        begin();
+      }
+    }
+
+    function stopGridPreviews() {
+      Object.keys(gridPreviewStartTimers).forEach((id) => {
+        clearTimeout(gridPreviewStartTimers[id]);
+        delete gridPreviewStartTimers[id];
+      });
+      Object.keys(gridPreviewTimers).forEach((id) => {
+        clearInterval(gridPreviewTimers[id]);
+        delete gridPreviewTimers[id];
+      });
+      for (let i = 1; i <= 4; i += 1) {
+        gridPreviewInFlight[i] = false;
+        gridPreviewPending[i] = false;
+        gridPreviewFailCount[i] = 0;
+        const img = document.getElementById(`gridPreview${i}`);
+        if (img) {
+          if (img._lastObjUrl) {
+            try { URL.revokeObjectURL(img._lastObjUrl); } catch (e) { /* ignore */ }
+            img._lastObjUrl = null;
+          }
+          img.removeAttribute('src');
+          img.style.display = 'none';
+        }
+        clearTileOverlays(i);
+        const video = videoEls[i];
+        if (video) {
+          video.style.display = 'block';
+          unfreezeVideoFrame(video, i, false);
+        }
+      }
+    }
+
+    function stopGridWebRTC() {
+      Object.values(gridPeers).forEach((pcItem) => {
+        try { pcItem.close(); } catch (e) { /* ignore */ }
+      });
+      gridPeers = {};
     }
 
     async function startGridView() {
       if (gridRunning) return;
       showGridUI();
       gridRunning = true;
-      // Stop analytics stream if active
       stopAnalytics();
-      const cameraIds = [1, 2, 3, 4];
-      for (const camId of cameraIds) {
-        try {
-          await startGridStream(camId);
-        } catch (e) {
-          console.error('Grid stream error', e);
-        }
-      }
+      stopGridWebRTC();
+      stopGridPreviews();
+      await setServerViewMode('grid');
+      for (let i = 1; i <= 4; i += 1) hideGridTileOverlay(i);
+      // JPEG previews from analytics pipeline — avoids 4 parallel WebRTC encoders (black tiles on cam 1/2)
+      [1, 2, 3, 4].forEach((camId) => startGridPreview(camId));
     }
 
     function stopGridView() {
       gridRunning = false;
-      Object.values(gridPeers).forEach(pcItem => {
-        try { pcItem.close(); } catch (e) { /* ignore */ }
-      });
-      gridPeers = {};
-      Object.values(videoEls).forEach(el => {
+      stopGridWebRTC();
+      stopGridPreviews();
+      Object.values(videoEls).forEach((el) => {
         if (!el) return;
         el.srcObject = null;
       });
@@ -2914,6 +3072,7 @@
 
     async function enterFocusView(cameraId) {
       setSelectedCameraId(cameraId);
+      await setServerViewMode('focus', cameraId);
       stopGridView();
       showFocusUI();
       const testBtn = document.getElementById("testBtn");
@@ -2922,6 +3081,7 @@
         testBtn.classList.add("stop");
       }
       testRunning = true;
+      await setServerViewMode('focus', cameraId);
       await startTestMode(cameraId);
     }
 

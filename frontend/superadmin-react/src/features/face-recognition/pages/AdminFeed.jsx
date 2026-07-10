@@ -178,8 +178,8 @@ export default function AdminFeed() {
     // Build iframe URL
     const token = getStoredToken();
     const feedUrl = token
-        ? `${BACKEND}/static/client.html?token=${encodeURIComponent(token)}`
-        : `${BACKEND}/static/client.html`;
+        ? `${BACKEND}/static/client.html?v=grid-smooth-4&token=${encodeURIComponent(token)}`
+        : `${BACKEND}/static/client.html?v=grid-smooth-4`;
 
     // ── Alert ingestion (called from postMessage listener) ────────────────
     const ingestAlert = useCallback((payload) => {

@@ -127,6 +127,7 @@ face_db_lock = threading.Lock()
 # acquire(blocking=False) so a camera that can't get the lock simply
 # skips face-id this frame and uses the cached name instead of blocking.
 faceid_inference_lock = threading.Lock()
+yolo_inference_lock = threading.Lock()
 
 # Per-camera frame counters (keyed by camera_id).  Using a single global
 # counter means all 4 RTSP threads hit should_faceid_now on the same tick,
@@ -290,6 +291,7 @@ stats_lock = threading.Lock()
 stats_counters = {
     "detection_runs": 0,  # how many times process_frame actually ran YOLO
     "outgoing_frames": 0,
+    "yolo_skip_busy": 0,  # YOLO skipped — GPU lock held by another camera
 }
 perf_lock = threading.Lock()
 
@@ -403,6 +405,8 @@ FOCUS_YOLO_INPUT_RESOLUTION = (
 # person model.  ByteTracker's rescue pool still handles 0.15–0.25
 # range detections that YOLO passes through (BT_TRACK_LOW_THRESH=0.15).
 YOLO_MIN_CONF = float(os.getenv("YOLO_MIN_CONF", "0.25"))
+YOLO_IOU = float(os.getenv("YOLO_IOU", "0.45"))
+YOLO_MAX_DET = _int_env("YOLO_MAX_DET", 300)
 PERSON_CLASS_IDS = set(_parse_int_list_env("PERSON_CLASS_IDS", default=""))
 OUTGOING_TRACK_FPS = _int_env("OUTGOING_TRACK_FPS", 30)
 
@@ -458,6 +462,9 @@ EVENT_CLIP_PRE_SECONDS = float(os.getenv("EVENT_CLIP_PRE_SECONDS", "6.0"))
 EVENT_CLIP_POST_SECONDS = max(0.0, EVENT_CLIP_SECONDS - EVENT_CLIP_PRE_SECONDS)
 EVENT_CLIP_FPS = max(1, _int_env("EVENT_CLIP_FPS", 6))
 EVENT_CLIP_JPEG_QUALITY = max(40, min(95, _int_env("EVENT_CLIP_JPEG_QUALITY", 92)))
+GRID_PREVIEW_JPEG_QUALITY = max(
+    40, min(95, _int_env("GRID_PREVIEW_JPEG_QUALITY", 72))
+)
 EVENT_CLIP_RETENTION_HOURS = max(1, _int_env("EVENT_CLIP_RETENTION_HOURS", 24))
 EVENT_CLIP_DRAW_OVERLAYS = os.getenv("EVENT_CLIP_DRAW_OVERLAYS", "1").strip() == "1"
 EVENT_CLIP_DIR = Path(
@@ -487,6 +494,109 @@ def _load_runtime_flags() -> None:
 _load_runtime_flags()
 ANALYTICS_ALL_CCTV = os.getenv("ANALYTICS_ALL_CCTV", "1").strip() == "1"
 ANALYTICS_CAMERA_IDS = _parse_int_list_env("ANALYTICS_CAMERA_IDS", "1,2,3,4")
+# Focus view: non-selected cameras run detection/alerts only (no live feed draw).
+ANALYTICS_HEADLESS_FPS = max(1, int(os.getenv("ANALYTICS_HEADLESS_FPS", "12")))
+HEADLESS_YOLO_EVERY_N = max(
+    1,
+    int(
+        os.getenv(
+            "HEADLESS_YOLO_EVERY_N",
+            str(max(2, YOLO_PROCESS_EVERY_N_FRAMES + 1)),
+        )
+    ),
+)
+
+_view_mode_lock = threading.Lock()
+_view_mode = "grid"  # "grid" | "focus"
+_focus_camera_id: int | None = None
+
+
+def _camera_should_display(camera_id) -> bool:
+    """True when this camera should render bboxes/overlays and update preview buffers."""
+    with _view_mode_lock:
+        mode = _view_mode
+        focus_id = _focus_camera_id
+    if mode != "focus":
+        return True
+    try:
+        return int(camera_id) == int(focus_id)
+    except Exception:
+        return False
+
+
+def _set_view_mode(mode: str, camera_id: int | None = None) -> dict:
+    global _view_mode, _focus_camera_id
+    normalized = (mode or "grid").strip().lower()
+    if normalized not in ("grid", "focus"):
+        normalized = "grid"
+    with _view_mode_lock:
+        _view_mode = normalized
+        if normalized == "focus" and camera_id is not None:
+            try:
+                _focus_camera_id = int(camera_id)
+            except Exception:
+                _focus_camera_id = None
+        elif normalized == "grid":
+            _focus_camera_id = None
+        focus_id = _focus_camera_id
+    return {"mode": normalized, "focus_camera_id": focus_id}
+
+
+def _is_grid_view_mode() -> bool:
+    with _view_mode_lock:
+        return _view_mode == "grid"
+
+
+_grid_yolo_executor = None
+_grid_yolo_pending: dict[int, bool] = {}
+_grid_yolo_pending_lock = threading.Lock()
+
+
+def _get_grid_yolo_executor():
+    global _grid_yolo_executor
+    if _grid_yolo_executor is None:
+        import concurrent.futures
+
+        _grid_yolo_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="grid-yolo"
+        )
+    return _grid_yolo_executor
+
+
+def _submit_grid_yolo(frame, camera_id) -> None:
+    """Run grid analytics without blocking the live preview loop."""
+    try:
+        cam_id = int(camera_id) if camera_id is not None else 1
+    except Exception:
+        cam_id = 1
+    with _grid_yolo_pending_lock:
+        if _grid_yolo_pending.get(cam_id):
+            return
+        _grid_yolo_pending[cam_id] = True
+
+    frame_copy = frame.copy()
+
+    def _work():
+        try:
+            process_frame(
+                frame_copy,
+                yolo_input_resolution=FOCUS_YOLO_INPUT_RESOLUTION,
+                no_pre_resize=True,
+                camera_id=cam_id,
+                display=True,
+                draw_overlays=False,
+            )
+        except Exception:
+            pass
+        finally:
+            with _grid_yolo_pending_lock:
+                _grid_yolo_pending[cam_id] = False
+
+    try:
+        _get_grid_yolo_executor().submit(_work)
+    except Exception:
+        with _grid_yolo_pending_lock:
+            _grid_yolo_pending[cam_id] = False
 
 work_timer_lock = threading.Lock()
 work_timer_state = {}
@@ -534,7 +644,8 @@ def _load_bytetrack_args() -> SimpleNamespace:
     #   "box flickers / new ID every re-appearance" symptom.
     data["track_high_thresh"] = float(os.getenv("BT_TRACK_HIGH_THRESH", "0.35"))
     data["track_low_thresh"]  = float(os.getenv("BT_TRACK_LOW_THRESH",  "0.15"))
-    data["new_track_thresh"]  = float(os.getenv("BT_NEW_TRACK_THRESH",  "0.35"))
+    _high = data["track_high_thresh"]
+    data["new_track_thresh"]  = float(os.getenv("BT_NEW_TRACK_THRESH", str(_high)))
     data["track_buffer"]      = int(os.getenv("BT_TRACK_BUFFER",        "90"))
     data["match_thresh"]      = float(os.getenv("BT_MATCH_THRESH",      "0.85"))
     data.setdefault("fuse_score", True)
@@ -2526,6 +2637,26 @@ async def event_clips_set_settings(request):
     return web.json_response({"enabled": bool(final)})
 
 
+async def set_view_mode_handler(request):
+    """Switch between grid (all cameras display) and focus (one display, rest headless)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    mode = (body or {}).get("mode", "grid")
+    camera_id = (body or {}).get("camera_id")
+    result = _set_view_mode(mode, camera_id)
+    logger.info(
+        f"View mode → {result['mode']}"
+        + (
+            f" (camera {result['focus_camera_id']})"
+            if result.get("focus_camera_id") is not None
+            else ""
+        )
+    )
+    return web.json_response(result)
+
+
 def _queue_event_clip(
     camera_id,
     event_text: str,
@@ -3683,8 +3814,31 @@ def _draw_cached_dets(frame, cached, roi_box, camera_id=None):
             continue
 
 
+def _grid_overlay_only(frame, camera_id):
+    """Fast grid preview: fresh RTSP frame + cached boxes/zones (no YOLO)."""
+    out = frame.copy()
+    cs = _cs(camera_id)
+    orig_h, orig_w = out.shape[:2]
+    roi_box = None
+    if web_roi and bool(web_roi.get("enabled")):
+        wx1 = int(web_roi["x"] * orig_w)
+        wy1 = int(web_roi["y"] * orig_h)
+        wx2 = int((web_roi["x"] + web_roi["w"]) * orig_w)
+        wy2 = int((web_roi["y"] + web_roi["h"]) * orig_h)
+        roi_box = (wx1, wy1, wx2, wy2)
+    if cs["draw_dets"]:
+        _draw_cached_dets(out, cs["draw_dets"], roi_box, camera_id)
+    _maybe_draw_live_overlays(out, camera_id)
+    return out
+
+
 def process_frame(
-    frame, yolo_input_resolution=None, no_pre_resize: bool = False, camera_id=None
+    frame,
+    yolo_input_resolution=None,
+    no_pre_resize: bool = False,
+    camera_id=None,
+    display: bool = True,
+    draw_overlays: bool | None = None,
 ):
     # Silence extremely verbose per-frame prints unless explicitly enabled.
     if not PROCESS_FRAME_DEBUG:
@@ -3694,6 +3848,10 @@ def process_frame(
 
     if ENROLLMENT_ACTIVE:
         return frame
+    if draw_overlays is None:
+        draw_overlays = display
+    elif not display:
+        draw_overlays = False
     t0 = time.perf_counter()
     t = t0
     global pid_display_counter, last_active_pids, last_active_alert_keys
@@ -3729,186 +3887,168 @@ def process_frame(
                 f"📏 ROI AREA: ({wx1},{wy1}) to ({wx2},{wy2}) [{wx2 - wx1}x{wy2 - wy1}px]"
             )
 
+    yolo_every_n = YOLO_PROCESS_EVERY_N_FRAMES
+    if not display:
+        yolo_every_n = max(yolo_every_n, HEADLESS_YOLO_EVERY_N)
+
     should_process = (
-        process_frame.frame_counter % YOLO_PROCESS_EVERY_N_FRAMES == 0
+        cam_frame_counter % yolo_every_n == 0
         or cs["yolo_frame"] is None
         or now - cs["yolo_time"] > 1.0
     )
-    if not should_process:
-        if cs["draw_dets"]:
-            _draw_cached_dets(frame, cs["draw_dets"], roi_box, camera_id)
-        _maybe_draw_live_overlays(frame, camera_id)
-        try:
-            _event_clip_on_frame(camera_id, frame, time.time())
-        except Exception:
-            pass
-        # Never return a stale frame; it causes visible freezing/jitter.
+
+    def _return_with_cached_overlays():
+        if draw_overlays:
+            if cs["draw_dets"]:
+                _draw_cached_dets(frame, cs["draw_dets"], roi_box, camera_id)
+            _maybe_draw_live_overlays(frame, camera_id)
+            try:
+                _event_clip_on_frame(camera_id, frame, time.time())
+            except Exception:
+                pass
         return frame
 
-    cs["yolo_time"] = now
-    target_w, target_h = yolo_input_resolution or YOLO_INPUT_RESOLUTION
-    if no_pre_resize:
-        small = frame
-    else:
-        try:
-            small = cv2.resize(frame, (target_w, target_h))
-        except Exception:
-            fallback_w = min(max(64, frame.shape[1]), target_w)
-            fallback_h = min(max(64, frame.shape[0]), target_h)
-            small = cv2.resize(frame, (fallback_w, fallback_h))
-    processed_h, processed_w = small.shape[:2]
+    if not should_process:
+        return _return_with_cached_overlays()
 
-    # Ensure contiguous memory for faster upload/preprocess.
+    # Only one YOLO inference at a time — other cameras keep live video + cached boxes.
+    yolo_slot_acquired = False
+    if yolo_model is not None:
+        yolo_slot_acquired = yolo_inference_lock.acquire(blocking=False)
+        if not yolo_slot_acquired:
+            try:
+                with stats_lock:
+                    stats_counters["yolo_skip_busy"] += 1
+            except Exception:
+                pass
+            return _return_with_cached_overlays()
+
     try:
-        small = np.ascontiguousarray(small)
-    except Exception:
-        pass
-    t = log_step("resize", t)
-    t_resize = time.perf_counter()
-
-    amp_enabled = bool(use_cuda and YOLO_ENABLE_FP16)
-    yolo_imgsz = int(max(target_w, target_h))
-    raw_dets = []
-    yolo_names = getattr(yolo_model, "names", {})
-
-    def _label_for(cls_id):
+        cs["yolo_time"] = now
+        target_w, target_h = yolo_input_resolution or YOLO_INPUT_RESOLUTION
+        if no_pre_resize:
+            small = frame
+        else:
+            try:
+                small = cv2.resize(frame, (target_w, target_h))
+            except Exception:
+                fallback_w = min(max(64, frame.shape[1]), target_w)
+                fallback_h = min(max(64, frame.shape[0]), target_h)
+                small = cv2.resize(frame, (fallback_w, fallback_h))
+        processed_h, processed_w = small.shape[:2]
+    
+        # Ensure contiguous memory for faster upload/preprocess.
         try:
-            if isinstance(yolo_names, dict):
-                return str(yolo_names.get(cls_id, cls_id))
-            if (
-                isinstance(yolo_names, (list, tuple))
-                and cls_id is not None
-                and cls_id < len(yolo_names)
-            ):
-                return str(yolo_names[cls_id])
+            small = np.ascontiguousarray(small)
         except Exception:
             pass
-        return str(cls_id) if cls_id is not None else "object"
-
-    use_tiling = bool(YOLO_TILING and no_pre_resize)
-    # Pass the ByteTracker low-threshold as the model-level NMS confidence floor.
-    # This removes near-zero-confidence noise *inside* YOLO before it ever reaches
-    # ByteTracker, keeping the tracker's state clean without throwing away the
-    # low-confidence detections that ByteTracker needs for its rescue pool.
-    # Default raised to 0.15 in sync with BT_TRACK_LOW_THRESH.
-    _yolo_conf_thr = max(0.01, float(os.getenv("BT_TRACK_LOW_THRESH", "0.15")))
-
-    # --- Run general YOLO model (MODEL_SELECT 1, 5, 6) ---
-    results = None
-    if yolo_model is not None:
-        with torch.inference_mode():
-            with torch.cuda.amp.autocast(enabled=amp_enabled):
-                if use_tiling:
-                    tile_w = max(1, orig_w // 2)
-                    tile_h = max(1, orig_h // 2)
-                    tiles = [
-                        (0, 0, tile_w, tile_h),
-                        (tile_w, 0, orig_w, tile_h),
-                        (0, tile_h, tile_w, orig_h),
-                        (tile_w, tile_h, orig_w, orig_h),
-                    ]
-                    for x0, y0, x1, y1 in tiles:
-                        tile = frame[y0:y1, x0:x1]
-                        if tile.size == 0:
-                            continue
-                        results = yolo_model(tile, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
-                        for b in results.boxes:
-                            cls_id = None
-                            conf = None
-                            try:
-                                cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
-                            except Exception:
+        t = log_step("resize", t)
+        t_resize = time.perf_counter()
+    
+        amp_enabled = bool(use_cuda and YOLO_ENABLE_FP16)
+        yolo_imgsz = int(max(target_w, target_h))
+        raw_dets = []
+        yolo_names = getattr(yolo_model, "names", {})
+    
+        def _label_for(cls_id):
+            try:
+                if isinstance(yolo_names, dict):
+                    return str(yolo_names.get(cls_id, cls_id))
+                if (
+                    isinstance(yolo_names, (list, tuple))
+                    and cls_id is not None
+                    and cls_id < len(yolo_names)
+                ):
+                    return str(yolo_names[cls_id])
+            except Exception:
+                pass
+            return str(cls_id) if cls_id is not None else "object"
+    
+        use_tiling = bool(YOLO_TILING and no_pre_resize)
+        # Pass the ByteTracker low-threshold as the model-level NMS confidence floor.
+        # This removes near-zero-confidence noise *inside* YOLO before it ever reaches
+        # ByteTracker, keeping the tracker's state clean without throwing away the
+        # low-confidence detections that ByteTracker needs for its rescue pool.
+        # Default raised to 0.15 in sync with BT_TRACK_LOW_THRESH.
+        _yolo_conf_thr = max(0.01, float(os.getenv("BT_TRACK_LOW_THRESH", "0.15")))
+    
+        # --- Run general YOLO model (MODEL_SELECT 1, 5, 6) ---
+        results = None
+        if yolo_model is not None:
+            with torch.inference_mode():
+                with torch.cuda.amp.autocast(enabled=amp_enabled):
+                    if use_tiling:
+                        tile_w = max(1, orig_w // 2)
+                        tile_h = max(1, orig_h // 2)
+                        tiles = [
+                            (0, 0, tile_w, tile_h),
+                            (tile_w, 0, orig_w, tile_h),
+                            (0, tile_h, tile_w, orig_h),
+                            (tile_w, tile_h, orig_w, orig_h),
+                        ]
+                        for x0, y0, x1, y1 in tiles:
+                            tile = frame[y0:y1, x0:x1]
+                            if tile.size == 0:
+                                continue
+                            results = yolo_model(
+                                tile, imgsz=yolo_imgsz, verbose=False,
+                                conf=_yolo_conf_thr, iou=YOLO_IOU, max_det=YOLO_MAX_DET,
+                            )[0]
+                            for b in results.boxes:
                                 cls_id = None
-                            try:
-                                conf = float(b.conf[0]) if hasattr(b, "conf") else None
-                            except Exception:
                                 conf = None
-                            if (
-                                PERSON_CLASS_IDS
-                                and cls_id is not None
-                                and cls_id not in PERSON_CLASS_IDS
-                            ):
-                                continue
-                            if conf is not None and conf < YOLO_MIN_CONF:
-                                continue
-                            bx1, by1, bx2, by2 = b.xyxy[0].tolist()
-                            raw_dets.append(
-                                {
-                                    "box": [bx1 + x0, by1 + y0, bx2 + x0, by2 + y0],
-                                    "cls_id": cls_id,
-                                    "conf": conf,
-                                    "label": _label_for(cls_id),
-                                }
-                            )
-                    processed_h, processed_w = orig_h, orig_w
-                    results = None
-                else:
-                    results = yolo_model(small, imgsz=yolo_imgsz, verbose=False, conf=_yolo_conf_thr, iou=0.45)[0]
-    # Note: torch.cuda.synchronize() removed — accessing tensor data (.tolist(),
-    # .cls, .conf) already triggers an implicit sync.  The explicit call was
-    # adding ~2-5 ms of pure wait per frame across all 4 camera threads.
-    t = log_step("yolo", t)
-    t_yolo = time.perf_counter()
-
-    try:
-        with stats_lock:
-            stats_counters["detection_runs"] += 1
-    except Exception:
-        pass
-
-    detections = len(results.boxes) if results is not None else len(raw_dets)
-    if cam_frame_counter % 100 == 0:
-        logger.debug(f"🔍 YOLO detected {detections} objects (cam {camera_id})")
-
-    if results is not None:
-        for b in results.boxes:
-            cls_id = None
-            conf = None
-            try:
-                cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
-            except Exception:
-                cls_id = None
-            try:
-                conf = float(b.conf[0]) if hasattr(b, "conf") else None
-            except Exception:
-                conf = None
-
-            if (
-                PERSON_CLASS_IDS
-                and cls_id is not None
-                and cls_id not in PERSON_CLASS_IDS
-            ):
-                continue
-            if conf is not None and conf < YOLO_MIN_CONF:
-                continue
-
-            x1, y1, x2, y2 = b.xyxy[0].tolist()
-            scale_x = orig_w / processed_w if processed_w else 1.0
-            scale_y = orig_h / processed_h if processed_h else 1.0
-            x1 *= scale_x
-            x2 *= scale_x
-            y1 *= scale_y
-            y2 *= scale_y
-            raw_dets.append(
-                {
-                    "box": [x1, y1, x2, y2],
-                    "cls_id": cls_id,
-                    "conf": conf,
-                    "label": _label_for(cls_id),
-                    "source": "yolo",
-                }
-            )
-
-    # --- Run specialized models based on MODEL_SELECT ---
-    def _run_specialized_model(model, input_frame, model_name, scale_x=1.0, scale_y=1.0):
-        """Run a specialized YOLO model and return raw detections."""
-        spec_dets = []
-        if model is None:
-            return spec_dets
+                                try:
+                                    cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
+                                except Exception:
+                                    cls_id = None
+                                try:
+                                    conf = float(b.conf[0]) if hasattr(b, "conf") else None
+                                except Exception:
+                                    conf = None
+                                if (
+                                    PERSON_CLASS_IDS
+                                    and cls_id is not None
+                                    and cls_id not in PERSON_CLASS_IDS
+                                ):
+                                    continue
+                                if conf is not None and conf < YOLO_MIN_CONF:
+                                    continue
+                                bx1, by1, bx2, by2 = b.xyxy[0].tolist()
+                                raw_dets.append(
+                                    {
+                                        "box": [bx1 + x0, by1 + y0, bx2 + x0, by2 + y0],
+                                        "cls_id": cls_id,
+                                        "conf": conf,
+                                        "label": _label_for(cls_id),
+                                    }
+                                )
+                        processed_h, processed_w = orig_h, orig_w
+                        results = None
+                    else:
+                        results = yolo_model(
+                            small, imgsz=yolo_imgsz, verbose=False,
+                            conf=_yolo_conf_thr, iou=YOLO_IOU, max_det=YOLO_MAX_DET,
+                        )[0]
+        # Note: torch.cuda.synchronize() removed — accessing tensor data (.tolist(),
+        # .cls, .conf) already triggers an implicit sync.  The explicit call was
+        # adding ~2-5 ms of pure wait per frame across all 4 camera threads.
+        t = log_step("yolo", t)
+        t_yolo = time.perf_counter()
+    
         try:
-            spec_names = getattr(model, "names", {})
-            spec_results = model(input_frame, imgsz=yolo_imgsz, verbose=False, conf=0.25, iou=0.45)[0]
-            for b in spec_results.boxes:
+            with stats_lock:
+                stats_counters["detection_runs"] += 1
+        except Exception:
+            pass
+    
+        detections = len(results.boxes) if results is not None else len(raw_dets)
+        if cam_frame_counter % 100 == 0:
+            logger.debug(f"🔍 YOLO detected {detections} objects (cam {camera_id})")
+    
+        if results is not None:
+            for b in results.boxes:
+                cls_id = None
+                conf = None
                 try:
                     cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
                 except Exception:
@@ -3917,217 +4057,233 @@ def process_frame(
                     conf = float(b.conf[0]) if hasattr(b, "conf") else None
                 except Exception:
                     conf = None
-                if conf is not None and conf < 0.20:
+    
+                if (
+                    PERSON_CLASS_IDS
+                    and cls_id is not None
+                    and cls_id not in PERSON_CLASS_IDS
+                ):
                     continue
-                sx1, sy1, sx2, sy2 = b.xyxy[0].tolist()
-                sx1 *= scale_x
-                sx2 *= scale_x
-                sy1 *= scale_y
-                sy2 *= scale_y
-                # Get label from model's class names
-                spec_label = str(spec_names.get(cls_id, cls_id)) if isinstance(spec_names, dict) else str(cls_id)
-                spec_dets.append({
-                    "box": [sx1, sy1, sx2, sy2],
-                    "cls_id": cls_id,
-                    "conf": conf,
-                    "label": spec_label,
-                    "source": model_name,
-                })
-        except Exception as e:
-            logger.warning(f"[{model_name}] inference error: {e}")
-        return spec_dets
-
-    _spec_scale_x = orig_w / processed_w if processed_w else 1.0
-    _spec_scale_y = orig_h / processed_h if processed_h else 1.0
-
-    with torch.inference_mode():
-        with torch.cuda.amp.autocast(enabled=amp_enabled):
-            # Face detection model (MODEL_SELECT 2, 5, 7, 11, 12)
-            if face_det_model is not None:
-                _run_face = (MODEL_SELECT in (2, 7, 11, 12)) or (cam_frame_counter % max(1, FACE_DET_EVERY_N_FRAMES) == 0)
-                if _run_face:
-                    raw_dets.extend(_run_specialized_model(
-                        face_det_model, small, "face_det", _spec_scale_x, _spec_scale_y
-                    ))
-
-            # Fire/smoke model (MODEL_SELECT 3, 5, 7, 11, 12)
-            if fire_model is not None:
-                _run_fire = (MODEL_SELECT in (3, 7, 11, 12)) or (cam_frame_counter % max(1, FIRE_EVERY_N_FRAMES) == 0)
-                if _run_fire:
-                    raw_dets.extend(_run_specialized_model(
-                        fire_model, small, "fire", _spec_scale_x, _spec_scale_y
-                    ))
-
-            # License plate model (MODEL_SELECT 4, 5, 7, 11, 12)
-            if lpd_model is not None:
-                _run_lpd = (MODEL_SELECT in (4, 7, 11, 12)) or (cam_frame_counter % max(1, LPD_EVERY_N_FRAMES) == 0)
-                if _run_lpd:
-                    raw_dets.extend(_run_specialized_model(
-                        lpd_model, small, "lpd", _spec_scale_x, _spec_scale_y
-                    ))
-
-    t_pre_track = time.perf_counter()
-    if USE_BYTETRACK:
-        raw_dets = _apply_bytetrack(raw_dets, frame, camera_id, _label_for)
-    t_track = time.perf_counter()
-    track_ms_this = (t_track - t_pre_track) * 1000.0
-
-    raw_dets = _dedupe_overlapping_dets(raw_dets, iou_thr=WORK_DEDUPE_IOU)
-
-    ts = time.time()
-    active_ids = []
-    active_alert_keys = set()
-    used_work_keys = set()
-    active_track_ids = []
-    pid_tracker = _get_pid_tracker(camera_id) if PID_ENABLE else None
-
-    # ----------------------------------------------------------------
-    # Batch face recognition — ONE GPU pass covers ALL people per frame.
-    # Every FACE_EVERY_N_FRAMES-th frame we run recognize_batch on the
-    # full frame; InsightFace detects all faces in one shot and we match
-    # each result back to the YOLO box.  This avoids N sequential model
-    # calls and keeps the feed smooth even with many people in view.
-    # ----------------------------------------------------------------
-    can_faceid = bool(
-        FACE_ENABLE and faceid and faceid.app and faceid.embeddings is not None
-    )
-    should_faceid_now = cam_frame_counter % max(1, FACE_EVERY_N_FRAMES) == 0
-
-    # Collect person boxes/indices for batch call (we need PIDs first, so
-    # we do a lightweight first pass to resolve PIDs, then batch face-id).
-    person_entries = []  # (list_index, pid, x1, y1, x2, y2)
-    resolved_pids = []  # pid per raw_det index, filled in main loop below
-
-    for i, det in enumerate(raw_dets):
-        x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
-        track_id = det.get("track_id")
-        try:
-            if pid_tracker and track_id is not None:
-                tid = int(track_id)
-                with pid_tracker_op_lock:
-                    pid = pid_tracker.assign_pid(
-                        tid, (x1, y1, x2, y2), ts, window=PID_REUSE_WINDOW
-                    )
-                    pid_tracker.mark_active(pid, (x1, y1, x2, y2), ts)
-                active_track_ids.append(tid)
-            elif track_id is not None:
-                pid = int(track_id)
-            else:
-                q = 10
-                stable_id = (
-                    int(round(x1 / q) * q),
-                    int(round(y1 / q) * q),
-                    int(round(x2 / q) * q),
-                    int(round(y2 / q) * q),
+                if conf is not None and conf < YOLO_MIN_CONF:
+                    continue
+    
+                x1, y1, x2, y2 = b.xyxy[0].tolist()
+                scale_x = orig_w / processed_w if processed_w else 1.0
+                scale_y = orig_h / processed_h if processed_h else 1.0
+                x1 *= scale_x
+                x2 *= scale_x
+                y1 *= scale_y
+                y2 *= scale_y
+                raw_dets.append(
+                    {
+                        "box": [x1, y1, x2, y2],
+                        "cls_id": cls_id,
+                        "conf": conf,
+                        "label": _label_for(cls_id),
+                        "source": "yolo",
+                    }
                 )
-                pid = int(hash(stable_id) & 0x7FFFFFFF)
-        except Exception:
-            pid = i
-        x1, y1, x2, y2 = smooth_bbox(
-            pid, (x1, y1, x2, y2), confidence=det.get("conf", 1.0), track_id=track_id
-        )
-        resolved_pids.append((pid, x1, y1, x2, y2, track_id))
-        class_flags = _classify_label(det.get("label"), det.get("cls_id"))
-        if class_flags.get("is_person"):
-            person_entries.append((i, pid, x1, y1, x2, y2))
-        active_ids.append(pid)
-
-    # Single batched face-id call (one GPU inference for all people).
-    # Non-blocking lock: if another camera thread is already running InsightFace,
-    # skip this frame — _cache_pid_name will return the last known name.
-    batch_results: dict[int, tuple] = {}  # det_index -> (name, score, emb)
-    if can_faceid and should_faceid_now and person_entries:
-        face_lock_acquired = faceid_inference_lock.acquire(blocking=False)
-        if face_lock_acquired:
-            face_start = time.time()
+    
+        # --- Run specialized models based on MODEL_SELECT ---
+        def _run_specialized_model(model, input_frame, model_name, scale_x=1.0, scale_y=1.0):
+            """Run a specialized YOLO model and return raw detections."""
+            spec_dets = []
+            if model is None:
+                return spec_dets
             try:
-                boxes_for_batch = [
-                    (x1, y1, x2, y2) for _, _, x1, y1, x2, y2 in person_entries
-                ]
-                batch = faceid.recognize_batch(frame, boxes_for_batch)
-                for (det_i, pid_i, *_), result in zip(person_entries, batch):
-                    batch_results[det_i] = result
-            except Exception as _face_err:
-                logger.warning("[FACE] recognize_batch error: %s", _face_err)
-            finally:
-                faceid_inference_lock.release()
-            face_time_total_ms = (time.time() - face_start) * 1000
-            if cam_frame_counter % (max(1, FACE_EVERY_N_FRAMES) * 10) == 0:
-                logger.info(
-                    f"⏱️ Batch face recognition ({len(person_entries)} people): {face_time_total_ms:.1f}ms"
-                )
-            t = log_step("faceid", t)
-        # else: lock busy — skip face-id this frame, use cached names
-    else:
-        face_time_total_ms = 0.0
-
-
-
-    det_items = []
-    active_smooth_keys = set()
-    for i, det in enumerate(raw_dets):
-        pid, x1, y1, x2, y2, track_id = resolved_pids[i]
-        active_smooth_keys.add(_bbox_smooth_key(pid, track_id))
-        cls_id = det.get("cls_id")
-        label = det.get("label")
-        track_id = det.get("track_id")
-
-        face_time_ms = None
-        name = "Unknown"
-        face_emb = None
-        class_flags = _classify_label(label, cls_id)
-        is_person = class_flags.get("is_person")
-        is_vehicle = class_flags.get("is_vehicle")
-        is_animal = class_flags.get("is_animal")
-        is_plate = class_flags.get("is_plate")
-        is_fire = class_flags.get("is_fire")
-        is_face = class_flags.get("is_face")
-        det_source = det.get("source", "yolo")
-
-        if is_person and i in batch_results:
-            name, _score, face_emb = batch_results[i]
-
-        if is_person:
-            name = _cache_pid_name(pid, name, now)
-        else:
-            name = label or "Object"
-
-        work_key = None
-        display_id = None
-        if is_person:
-            # Highest priority: known face name (cross-camera continuity).
-            if WORK_CROSS_CAMERA_BY_NAME and name and name != "Unknown":
-                work_key = _touch_work_key(
-                    f"name:{name.lower()}",
-                    pid,
-                    (x1, y1, x2, y2),
-                    ts,
-                    name,
-                    camera_id,
-                    face_emb,
-                )
-            # Next: face-embedding re-id for unknowns across camera switches.
-            elif face_emb is not None:
-                emb_key = _match_or_create_face_work_key(
-                    face_emb,
-                    ts,
-                    center=(
-                        (float(x1) + float(x2)) * 0.5,
-                        (float(y1) + float(y2)) * 0.5,
-                    ),
-                    camera_id=camera_id,
-                    used_keys=used_work_keys,
-                )
-                if emb_key is not None:
-                    work_key = _touch_work_key(
-                        emb_key, pid, (x1, y1, x2, y2), ts, name, camera_id, face_emb
+                spec_names = getattr(model, "names", {})
+                spec_results = model(input_frame, imgsz=yolo_imgsz, verbose=False, conf=0.25, iou=0.45)[0]
+                for b in spec_results.boxes:
+                    try:
+                        cls_id = int(b.cls[0]) if hasattr(b, "cls") else None
+                    except Exception:
+                        cls_id = None
+                    try:
+                        conf = float(b.conf[0]) if hasattr(b, "conf") else None
+                    except Exception:
+                        conf = None
+                    if conf is not None and conf < 0.20:
+                        continue
+                    sx1, sy1, sx2, sy2 = b.xyxy[0].tolist()
+                    sx1 *= scale_x
+                    sx2 *= scale_x
+                    sy1 *= scale_y
+                    sy2 *= scale_y
+                    # Get label from model's class names
+                    spec_label = str(spec_names.get(cls_id, cls_id)) if isinstance(spec_names, dict) else str(cls_id)
+                    spec_dets.append({
+                        "box": [sx1, sy1, sx2, sy2],
+                        "cls_id": cls_id,
+                        "conf": conf,
+                        "label": spec_label,
+                        "source": model_name,
+                    })
+            except Exception as e:
+                logger.warning(f"[{model_name}] inference error: {e}")
+            return spec_dets
+    
+        _spec_scale_x = orig_w / processed_w if processed_w else 1.0
+        _spec_scale_y = orig_h / processed_h if processed_h else 1.0
+    
+        with torch.inference_mode():
+            with torch.cuda.amp.autocast(enabled=amp_enabled):
+                # Face detection model (MODEL_SELECT 2, 5, 7, 11, 12)
+                if face_det_model is not None:
+                    _run_face = (MODEL_SELECT in (2, 7, 11, 12)) or (cam_frame_counter % max(1, FACE_DET_EVERY_N_FRAMES) == 0)
+                    if _run_face:
+                        raw_dets.extend(_run_specialized_model(
+                            face_det_model, small, "face_det", _spec_scale_x, _spec_scale_y
+                        ))
+    
+                # Fire/smoke model (MODEL_SELECT 3, 5, 7, 11, 12)
+                if fire_model is not None:
+                    _run_fire = (MODEL_SELECT in (3, 7, 11, 12)) or (cam_frame_counter % max(1, FIRE_EVERY_N_FRAMES) == 0)
+                    if _run_fire:
+                        raw_dets.extend(_run_specialized_model(
+                            fire_model, small, "fire", _spec_scale_x, _spec_scale_y
+                        ))
+    
+                # License plate model (MODEL_SELECT 4, 5, 7, 11, 12)
+                if lpd_model is not None:
+                    _run_lpd = (MODEL_SELECT in (4, 7, 11, 12)) or (cam_frame_counter % max(1, LPD_EVERY_N_FRAMES) == 0)
+                    if _run_lpd:
+                        raw_dets.extend(_run_specialized_model(
+                            lpd_model, small, "lpd", _spec_scale_x, _spec_scale_y
+                        ))
+    
+        t_pre_track = time.perf_counter()
+        if USE_BYTETRACK:
+            raw_dets = _apply_bytetrack(raw_dets, frame, camera_id, _label_for)
+        t_track = time.perf_counter()
+        track_ms_this = (t_track - t_pre_track) * 1000.0
+    
+        raw_dets = _dedupe_overlapping_dets(raw_dets, iou_thr=WORK_DEDUPE_IOU)
+    
+        ts = time.time()
+        active_ids = []
+        active_alert_keys = set()
+        used_work_keys = set()
+        active_track_ids = []
+        pid_tracker = _get_pid_tracker(camera_id) if PID_ENABLE else None
+    
+        # ----------------------------------------------------------------
+        # Batch face recognition — ONE GPU pass covers ALL people per frame.
+        # Every FACE_EVERY_N_FRAMES-th frame we run recognize_batch on the
+        # full frame; InsightFace detects all faces in one shot and we match
+        # each result back to the YOLO box.  This avoids N sequential model
+        # calls and keeps the feed smooth even with many people in view.
+        # ----------------------------------------------------------------
+        can_faceid = bool(
+            FACE_ENABLE and faceid and faceid.app and faceid.embeddings is not None
+        )
+        should_faceid_now = cam_frame_counter % max(1, FACE_EVERY_N_FRAMES) == 0
+    
+        # Collect person boxes/indices for batch call (we need PIDs first, so
+        # we do a lightweight first pass to resolve PIDs, then batch face-id).
+        person_entries = []  # (list_index, pid, x1, y1, x2, y2)
+        resolved_pids = []  # pid per raw_det index, filled in main loop below
+    
+        for i, det in enumerate(raw_dets):
+            x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
+            track_id = det.get("track_id")
+            try:
+                if pid_tracker and track_id is not None:
+                    tid = int(track_id)
+                    with pid_tracker_op_lock:
+                        pid = pid_tracker.assign_pid(
+                            tid, (x1, y1, x2, y2), ts, window=PID_REUSE_WINDOW
+                        )
+                        pid_tracker.mark_active(pid, (x1, y1, x2, y2), ts)
+                    active_track_ids.append(tid)
+                elif track_id is not None:
+                    pid = int(track_id)
+                else:
+                    q = 10
+                    stable_id = (
+                        int(round(x1 / q) * q),
+                        int(round(y1 / q) * q),
+                        int(round(x2 / q) * q),
+                        int(round(y2 / q) * q),
                     )
-
-            # Then: tracker-anchored key when available to keep ID/timer stable.
-            if work_key is None and track_id is not None:
+                    pid = int(hash(stable_id) & 0x7FFFFFFF)
+            except Exception:
+                pid = i
+            x1, y1, x2, y2 = smooth_bbox(
+                pid, (x1, y1, x2, y2), confidence=det.get("conf", 1.0), track_id=track_id
+            )
+            resolved_pids.append((pid, x1, y1, x2, y2, track_id))
+            class_flags = _classify_label(det.get("label"), det.get("cls_id"))
+            if class_flags.get("is_person"):
+                person_entries.append((i, pid, x1, y1, x2, y2))
+            active_ids.append(pid)
+    
+        # Single batched face-id call (one GPU inference for all people).
+        # Non-blocking lock: if another camera thread is already running InsightFace,
+        # skip this frame — _cache_pid_name will return the last known name.
+        batch_results: dict[int, tuple] = {}  # det_index -> (name, score, emb)
+        if can_faceid and should_faceid_now and person_entries:
+            face_lock_acquired = faceid_inference_lock.acquire(blocking=False)
+            if face_lock_acquired:
+                face_start = time.time()
                 try:
+                    boxes_for_batch = [
+                        (x1, y1, x2, y2) for _, _, x1, y1, x2, y2 in person_entries
+                    ]
+                    batch = faceid.recognize_batch(frame, boxes_for_batch)
+                    for (det_i, pid_i, *_), result in zip(person_entries, batch):
+                        batch_results[det_i] = result
+                except Exception as _face_err:
+                    logger.warning("[FACE] recognize_batch error: %s", _face_err)
+                finally:
+                    faceid_inference_lock.release()
+                face_time_total_ms = (time.time() - face_start) * 1000
+                if cam_frame_counter % (max(1, FACE_EVERY_N_FRAMES) * 10) == 0:
+                    logger.info(
+                        f"⏱️ Batch face recognition ({len(person_entries)} people): {face_time_total_ms:.1f}ms"
+                    )
+                t = log_step("faceid", t)
+            # else: lock busy — skip face-id this frame, use cached names
+        else:
+            face_time_total_ms = 0.0
+    
+    
+    
+        det_items = []
+        active_smooth_keys = set()
+        for i, det in enumerate(raw_dets):
+            pid, x1, y1, x2, y2, track_id = resolved_pids[i]
+            active_smooth_keys.add(_bbox_smooth_key(pid, track_id))
+            cls_id = det.get("cls_id")
+            label = det.get("label")
+            track_id = det.get("track_id")
+    
+            face_time_ms = None
+            name = "Unknown"
+            face_emb = None
+            class_flags = _classify_label(label, cls_id)
+            is_person = class_flags.get("is_person")
+            is_vehicle = class_flags.get("is_vehicle")
+            is_animal = class_flags.get("is_animal")
+            is_plate = class_flags.get("is_plate")
+            is_fire = class_flags.get("is_fire")
+            is_face = class_flags.get("is_face")
+            det_source = det.get("source", "yolo")
+    
+            if is_person and i in batch_results:
+                name, _score, face_emb = batch_results[i]
+    
+            if is_person:
+                name = _cache_pid_name(pid, name, now)
+            else:
+                name = label or "Object"
+    
+            work_key = None
+            display_id = None
+            if is_person:
+                # Highest priority: known face name (cross-camera continuity).
+                if WORK_CROSS_CAMERA_BY_NAME and name and name != "Unknown":
                     work_key = _touch_work_key(
-                        f"trk:{int(track_id)}",
+                        f"name:{name.lower()}",
                         pid,
                         (x1, y1, x2, y2),
                         ts,
@@ -4135,244 +4291,292 @@ def process_frame(
                         camera_id,
                         face_emb,
                     )
-                except Exception:
-                    work_key = _resolve_work_key(
-                        pid,
-                        (x1, y1, x2, y2),
+                # Next: face-embedding re-id for unknowns across camera switches.
+                elif face_emb is not None:
+                    emb_key = _match_or_create_face_work_key(
+                        face_emb,
                         ts,
-                        name,
-                        camera_id,
+                        center=(
+                            (float(x1) + float(x2)) * 0.5,
+                            (float(y1) + float(y2)) * 0.5,
+                        ),
+                        camera_id=camera_id,
                         used_keys=used_work_keys,
                     )
-            if work_key is None:
-                work_key = _resolve_work_key(
-                    pid, (x1, y1, x2, y2), ts, name, camera_id, used_keys=used_work_keys
+                    if emb_key is not None:
+                        work_key = _touch_work_key(
+                            emb_key, pid, (x1, y1, x2, y2), ts, name, camera_id, face_emb
+                        )
+    
+                # Then: tracker-anchored key when available to keep ID/timer stable.
+                if work_key is None and track_id is not None:
+                    try:
+                        work_key = _touch_work_key(
+                            f"trk:{int(track_id)}",
+                            pid,
+                            (x1, y1, x2, y2),
+                            ts,
+                            name,
+                            camera_id,
+                            face_emb,
+                        )
+                    except Exception:
+                        work_key = _resolve_work_key(
+                            pid,
+                            (x1, y1, x2, y2),
+                            ts,
+                            name,
+                            camera_id,
+                            used_keys=used_work_keys,
+                        )
+                if work_key is None:
+                    work_key = _resolve_work_key(
+                        pid, (x1, y1, x2, y2), ts, name, camera_id, used_keys=used_work_keys
+                    )
+                used_work_keys.add(work_key)
+                display_id = _get_or_create_work_display_id(work_key)
+    
+            display_name = name
+            if is_person and display_id is not None and name == "Unknown":
+                display_name = f"Person-{display_id}"
+    
+            alert_identity_key = work_key if (work_key is not None) else f"pid:{pid}"
+            active_alert_keys.add(alert_identity_key)
+    
+            if PROCESS_FRAME_DEBUG:
+                print(f"\n👤 DETECTION {i}:")
+                print(f"  PID: {pid}, Name: {display_name}")
+                print(f"  BBox: ({x1:.0f},{y1:.0f}) to ({x2:.0f},{y2:.0f})")
+    
+            # Keep detection alerts low-noise in production:
+            # - Unknown person detection alerts are handled by UNKNOWN_PERSON_FIRST_SEEN in rules.
+            # - Known person detection uses a wider cooldown.
+            alert_sent = False
+            if is_person and name != "Unknown":
+                known_key = work_key or f"name:{name.lower()}" if name else f"pid:{pid}"
+                if _should_emit_known_detect(str(known_key), ts):
+                    send_alert(
+                        display_name, f"P3 | CAM{_camera_key(camera_id)} | PERSON_DETECTED"
+                    )
+                    alert_sent = True
+    
+            # Fire/smoke alerts — high priority (P0)
+            if is_fire:
+                _fire_alert_key = f"fire:{_camera_key(camera_id)}:{label}"
+                if _should_emit_known_detect(_fire_alert_key, ts):
+                    _fire_conf = det.get("conf", 0)
+                    send_alert(
+                        "FIRE_ALERT",
+                        f"P0 | CAM{_camera_key(camera_id)} | {label.upper()} DETECTED | conf={_fire_conf:.0%}",
+                    )
+                    alert_sent = True
+    
+            if PROCESS_FRAME_DEBUG:
+                print(f"  Alert sent: {alert_sent}")
+    
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+    
+            alert_entity_key = work_key or f"pid:{pid}"
+            with roi_state_lock:
+                is_in_roi = (
+                    alert_entity_key in roi_state
+                    and "WEBROI" in roi_state[alert_entity_key]
                 )
-            used_work_keys.add(work_key)
-            display_id = _get_or_create_work_display_id(work_key)
+    
+            in_roi_now = False
+            if roi_box and is_person:
+                wx1, wy1, wx2, wy2 = roi_box
+                x_overlap = max(0, min(x2, wx2) - max(x1, wx1))
+                y_overlap = max(0, min(y2, wy2) - max(y1, wy1))
+                in_roi_now = x_overlap > 0 and y_overlap > 0
+    
+            roi_required = bool(WORK_TIMER_REQUIRE_ROI)
+            roi_enabled_now = bool(roi_box)
+            if roi_required and not roi_enabled_now:
+                roi_required = False
+    
+            work_active = bool(is_person) and (not roi_required or is_in_roi or in_roi_now)
+            timer_key = work_key if (is_person and work_key is not None) else str(pid)
+            work_seconds = _update_work_timer(timer_key, ts, work_active)
+            work_timer_txt = _format_timer(work_seconds)
 
-        display_name = name
-        if is_person and display_id is not None and name == "Unknown":
-            display_name = f"Person-{display_id}"
-
-        alert_identity_key = work_key if (work_key is not None) else f"pid:{pid}"
-        active_alert_keys.add(alert_identity_key)
-
-        if PROCESS_FRAME_DEBUG:
-            print(f"\n👤 DETECTION {i}:")
-            print(f"  PID: {pid}, Name: {display_name}")
-            print(f"  BBox: ({x1:.0f},{y1:.0f}) to ({x2:.0f},{y2:.0f})")
-
-        # Keep detection alerts low-noise in production:
-        # - Unknown person detection alerts are handled by UNKNOWN_PERSON_FIRST_SEEN in rules.
-        # - Known person detection uses a wider cooldown.
-        alert_sent = False
-        if is_person and name != "Unknown":
-            known_key = work_key or f"name:{name.lower()}" if name else f"pid:{pid}"
-            if _should_emit_known_detect(str(known_key), ts):
-                send_alert(
-                    display_name, f"P3 | CAM{_camera_key(camera_id)} | PERSON_DETECTED"
+            if draw_overlays:
+                color, draw_label = _get_semantic_color_and_label(
+                    det, is_in_roi, work_seconds
                 )
-                alert_sent = True
 
-        # Fire/smoke alerts — high priority (P0)
-        if is_fire:
-            _fire_alert_key = f"fire:{_camera_key(camera_id)}:{label}"
-            if _should_emit_known_detect(_fire_alert_key, ts):
-                _fire_conf = det.get("conf", 0)
-                send_alert(
-                    "FIRE_ALERT",
-                    f"P0 | CAM{_camera_key(camera_id)} | {label.upper()} DETECTED | conf={_fire_conf:.0%}",
+                cross_tag = (
+                    _get_cross_overlay(camera_id, alert_entity_key, ts)
+                    if is_person
+                    else None
                 )
-                alert_sent = True
+                if cross_tag:
+                    draw_label = f"{draw_label} [{cross_tag}]"
+                    flash_on = (CROSS_OVERLAY_FLASH_HZ <= 0.0) or (
+                        int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0
+                    )
+                    color = (0, 0, 255) if flash_on else (0, 180, 255)
 
-        if PROCESS_FRAME_DEBUG:
-            print(f"  Alert sent: {alert_sent}")
+                if WORK_TIMER_ENABLE and is_person:
+                    draw_label = f"{draw_label} {work_timer_txt}".strip()
 
-        cx = int((x1 + x2) / 2)
-        cy = int((y1 + y2) / 2)
-
-        alert_entity_key = work_key or f"pid:{pid}"
-        with roi_state_lock:
-            is_in_roi = (
-                alert_entity_key in roi_state
-                and "WEBROI" in roi_state[alert_entity_key]
+                thickness = (
+                    3
+                    if cross_tag
+                    and (
+                        (CROSS_OVERLAY_FLASH_HZ <= 0.0)
+                        or (int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0)
+                    )
+                    else 2
+                )
+                try:
+                    show_box = (not is_person) or _bbox_ready(pid, track_id)
+                    if show_box:
+                        _draw_det_bbox(
+                            frame,
+                            x1,
+                            y1,
+                            x2,
+                            y2,
+                            draw_label,
+                            color,
+                            box_thickness=thickness,
+                        )
+                except Exception as e:
+                    print(f"[DRAW] Failed to draw bounding box: {e}")
+    
+            if PROCESS_FRAME_DEBUG:
+                print(f"  Center: ({cx},{cy})")
+    
+            if roi_box and is_person:
+                _handle_roi_events(
+                    pid,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    roi_box,
+                    display_name,
+                    camera_id=camera_id,
+                    stable_key=work_key,
+                )
+    
+            det_items.append(
+                {
+                    "pid": pid,
+                    "track_id": track_id,
+                    "box": (x1, y1, x2, y2),
+                    "label": label,
+                    "cls_id": cls_id,
+                    "name": name,
+                    "display_name": display_name,
+                    "center": (cx, cy),
+                    "is_person": is_person,
+                    "is_vehicle": is_vehicle,
+                    "is_animal": is_animal,
+                    "is_plate": is_plate,
+                    "is_fire": is_fire,
+                    "is_face": is_face,
+                    "source": det_source,
+                    "work_seconds": work_seconds,
+                    "work_key": work_key,
+    
+                }
             )
-
-        in_roi_now = False
-        if roi_box and is_person:
-            wx1, wy1, wx2, wy2 = roi_box
-            x_overlap = max(0, min(x2, wx2) - max(x1, wx1))
-            y_overlap = max(0, min(y2, wy2) - max(y1, wy1))
-            in_roi_now = x_overlap > 0 and y_overlap > 0
-
-        roi_required = bool(WORK_TIMER_REQUIRE_ROI)
-        roi_enabled_now = bool(roi_box)
-        if roi_required and not roi_enabled_now:
-            roi_required = False
-
-        work_active = bool(is_person) and (not roi_required or is_in_roi or in_roi_now)
-        timer_key = work_key if (is_person and work_key is not None) else str(pid)
-        work_seconds = _update_work_timer(timer_key, ts, work_active)
-        work_timer_txt = _format_timer(work_seconds)
-
-        color, draw_label = _get_semantic_color_and_label(det, is_in_roi, work_seconds)
-
-        cross_tag = (
-            _get_cross_overlay(camera_id, alert_entity_key, ts) if is_person else None
-        )
-        if cross_tag:
-            draw_label = f"{draw_label} [{cross_tag}]"
-            flash_on = (CROSS_OVERLAY_FLASH_HZ <= 0.0) or (
-                int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0
-            )
-            color = (0, 0, 255) if flash_on else (0, 180, 255)
-
-        if WORK_TIMER_ENABLE and is_person:
-            draw_label = f"{draw_label} {work_timer_txt}".strip()
-
-        thickness = (
-            3
-            if cross_tag
-            and (
-                (CROSS_OVERLAY_FLASH_HZ <= 0.0)
-                or (int(ts * CROSS_OVERLAY_FLASH_HZ) % 2 == 0)
-            )
-            else 2
-        )
+    
+        if pid_tracker and active_track_ids:
+            with pid_tracker_op_lock:
+                pid_tracker.sweep_inactive(active_track_ids)
+    
+        _prune_bbox_hits(active_smooth_keys)
+    
+        t = log_step("draw", t)
+        t_draw = time.perf_counter()
         try:
-            show_box = (not is_person) or _bbox_ready(pid, track_id)
-            if show_box:
-                _draw_det_bbox(
-                    frame, x1, y1, x2, y2, draw_label, color, box_thickness=thickness
-                )
+            last_active_pids = set(active_ids)
+            last_active_alert_keys = set(active_alert_keys)
+        except Exception:
+            pass
+    
+        try:
+            cs["draw_dets"] = [
+                {
+                    "pid": d.get("pid"),
+                    "box": d.get("box"),
+                    "name": d.get("name", "Unknown"),
+                    "display_name": d.get("display_name", d.get("name", "Unknown")),
+                    "is_person": d.get("is_person"),
+                    "work_seconds": d.get("work_seconds", 0.0),
+                    "work_key": d.get("work_key"),
+                    "track_id": d.get("track_id"),
+    
+                }
+                for d in det_items
+                if (not d.get("is_person"))
+                or _bbox_ready(d.get("pid"), d.get("track_id"))
+            ]
+            cs["draw_time"] = now
+        except Exception:
+            pass
+    
+        try:
+            evaluate_camera_rules(camera_id, frame.shape, det_items, ts)
         except Exception as e:
-            print(f"[DRAW] Failed to draw bounding box: {e}")
-
-        if PROCESS_FRAME_DEBUG:
-            print(f"  Center: ({cx},{cy})")
-
-        if roi_box and is_person:
-            _handle_roi_events(
-                pid,
-                x1,
-                y1,
-                x2,
-                y2,
-                roi_box,
-                display_name,
-                camera_id=camera_id,
-                stable_key=work_key,
-            )
-
-        det_items.append(
-            {
-                "pid": pid,
-                "track_id": track_id,
-                "box": (x1, y1, x2, y2),
-                "label": label,
-                "cls_id": cls_id,
-                "name": name,
-                "display_name": display_name,
-                "center": (cx, cy),
-                "is_person": is_person,
-                "is_vehicle": is_vehicle,
-                "is_animal": is_animal,
-                "is_plate": is_plate,
-                "is_fire": is_fire,
-                "is_face": is_face,
-                "source": det_source,
-                "work_seconds": work_seconds,
-                "work_key": work_key,
-
-            }
-        )
-
-    if pid_tracker and active_track_ids:
-        with pid_tracker_op_lock:
-            pid_tracker.sweep_inactive(active_track_ids)
-
-    _prune_bbox_hits(active_smooth_keys)
-
-    t = log_step("draw", t)
-    t_draw = time.perf_counter()
-    try:
-        last_active_pids = set(active_ids)
-        last_active_alert_keys = set(active_alert_keys)
-    except Exception:
-        pass
-
-    try:
-        cs["draw_dets"] = [
-            {
-                "pid": d.get("pid"),
-                "box": d.get("box"),
-                "name": d.get("name", "Unknown"),
-                "display_name": d.get("display_name", d.get("name", "Unknown")),
-                "is_person": d.get("is_person"),
-                "work_seconds": d.get("work_seconds", 0.0),
-                "work_key": d.get("work_key"),
-                "track_id": d.get("track_id"),
-
-            }
-            for d in det_items
-            if (not d.get("is_person"))
-            or _bbox_ready(d.get("pid"), d.get("track_id"))
-        ]
-        cs["draw_time"] = now
-    except Exception:
-        pass
-
-    try:
-        evaluate_camera_rules(camera_id, frame.shape, det_items, ts)
-    except Exception as e:
-        if PROCESS_FRAME_DEBUG:
-            print(f"[RULES] Evaluation failed: {e}")
-
-    try:
-        _emit_presence_alert(camera_id, det_items, ts)
-    except Exception as e:
-        if PROCESS_FRAME_DEBUG:
-            print(f"[ALERTS] Presence emit failed: {e}")
-
-    try:
-        process_frame.last_processed = frame
-        cs["yolo_frame"] = frame
-    except Exception:
-        pass
-    if PERF_STATS:
+            if PROCESS_FRAME_DEBUG:
+                print(f"[RULES] Evaluation failed: {e}")
+    
         try:
-            total_ms = (t_draw - t0) * 1000.0
-            resize_ms = (t_resize - t0) * 1000.0
-            yolo_ms = (t_yolo - t_resize) * 1000.0
-            draw_ms = max(0.0, (t_draw - t_yolo) * 1000.0 - face_time_total_ms - track_ms_this)
-            with perf_lock:
-                perf_counters["frames"] += 1
-                perf_counters["resize_ms"] += resize_ms
-                perf_counters["yolo_ms"] += yolo_ms
-                perf_counters["track_ms"] += track_ms_this
-                perf_counters["faceid_ms"] += face_time_total_ms
-                perf_counters["draw_ms"] += draw_ms
-                perf_counters["total_ms"] += total_ms
+            _emit_presence_alert(camera_id, det_items, ts)
+        except Exception as e:
+            if PROCESS_FRAME_DEBUG:
+                print(f"[ALERTS] Presence emit failed: {e}")
+    
+        try:
+            process_frame.last_processed = frame
+            cs["yolo_frame"] = frame
         except Exception:
             pass
-    if EVENT_CLIP_ENABLE:
-        try:
-            # Offload event clip encoding to a background thread so JPEG encode
-            # does not block the processing thread and cause frame drops.
-            import concurrent.futures as _cf
+        if PERF_STATS:
+            try:
+                total_ms = (t_draw - t0) * 1000.0
+                resize_ms = (t_resize - t0) * 1000.0
+                yolo_ms = (t_yolo - t_resize) * 1000.0
+                draw_ms = max(0.0, (t_draw - t_yolo) * 1000.0 - face_time_total_ms - track_ms_this)
+                with perf_lock:
+                    perf_counters["frames"] += 1
+                    perf_counters["resize_ms"] += resize_ms
+                    perf_counters["yolo_ms"] += yolo_ms
+                    perf_counters["track_ms"] += track_ms_this
+                    perf_counters["faceid_ms"] += face_time_total_ms
+                    perf_counters["draw_ms"] += draw_ms
+                    perf_counters["total_ms"] += total_ms
+            except Exception:
+                pass
+        if draw_overlays and EVENT_CLIP_ENABLE:
+            try:
+                # Offload event clip encoding to a background thread so JPEG encode
+                # does not block the processing thread and cause frame drops.
+                import concurrent.futures as _cf
 
-            _clip_pool = getattr(_event_clip_on_frame, "_pool", None)
-            if _clip_pool is None:
-                _clip_pool = _cf.ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="clip"
-                )
-                _event_clip_on_frame._pool = _clip_pool
-            _clip_pool.submit(_event_clip_on_frame, camera_id, frame.copy(), time.time())
-        except Exception:
-            pass
-    _maybe_draw_live_overlays(frame, camera_id)
-    return frame
+                _clip_pool = getattr(_event_clip_on_frame, "_pool", None)
+                if _clip_pool is None:
+                    _clip_pool = _cf.ThreadPoolExecutor(
+                        max_workers=1, thread_name_prefix="clip"
+                    )
+                    _event_clip_on_frame._pool = _clip_pool
+                _clip_pool.submit(_event_clip_on_frame, camera_id, frame.copy(), time.time())
+            except Exception:
+                pass
+        if draw_overlays:
+            _maybe_draw_live_overlays(frame, camera_id)
+        return frame
+    finally:
+        if yolo_slot_acquired:
+            try:
+                yolo_inference_lock.release()
+            except RuntimeError:
+                pass
 
 
 async def broadcast_alert_all(payload: str) -> int:
@@ -4469,7 +4673,12 @@ class SharedServerCamera:
         # thread to consume.  Separating capture from inference means RTSP
         # reads are never stalled waiting for YOLO/face detection to finish.
         self._raw_frame = None
+        self._raw_frame_ts = 0.0
         self._raw_lock = threading.Lock()
+        self._last_good_raw = None
+        self._has_valid_latest = False
+        self._preview_jpeg: bytes | None = None
+        self._preview_jpeg_lock = threading.Lock()
 
     def add_client(self):
         with self._lock:
@@ -4601,6 +4810,7 @@ class SharedServerCamera:
                     last_ok = time.time()
                     with self._raw_lock:
                         self._raw_frame = frame
+                        self._raw_frame_ts = last_ok
                 else:
                     if time.time() - last_ok > RTSP_RETRY_DELAY_SEC:
                         try:
@@ -4618,13 +4828,57 @@ class SharedServerCamera:
                 except Exception:
                     pass
 
+    def _publish_latest(self, frame, out_w: int, out_h: int) -> None:
+        try:
+            h_in, w_in = frame.shape[:2]
+            if w_in != out_w or h_in != out_h:
+                if w_in > out_w or h_in > out_h:
+                    interp = cv2.INTER_AREA
+                else:
+                    interp = cv2.INTER_LANCZOS4
+                frame = cv2.resize(frame, (out_w, out_h), interpolation=interp)
+            published = np.ascontiguousarray(frame)
+            with self._lock:
+                self._latest = published
+                self._has_valid_latest = True
+            # Pre-encode grid JPEG once per frame update — preview polls read cache only.
+            if (
+                _is_grid_view_mode()
+                and out_w == GRID_CAMERA_WIDTH
+                and out_h == GRID_CAMERA_HEIGHT
+            ):
+                ok, buf = cv2.imencode(
+                    ".jpg",
+                    published,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), int(GRID_PREVIEW_JPEG_QUALITY)],
+                )
+                if ok:
+                    with self._preview_jpeg_lock:
+                        self._preview_jpeg = buf.tobytes()
+        except Exception:
+            pass
+
+    def has_valid_latest(self) -> bool:
+        with self._lock:
+            return bool(self._has_valid_latest)
+
+    def get_preview_jpeg(self) -> bytes | None:
+        with self._preview_jpeg_lock:
+            cached = self._preview_jpeg
+        if cached:
+            return cached
+        if not self.has_valid_latest():
+            return None
+        try:
+            frame = self.get_latest()
+            return _encode_grid_preview_jpeg(frame)
+        except Exception:
+            return None
+
     def _run(self):
-        # Target processing rate — capped by PROCESSING_FPS env var.
-        target_fps = int(SERVER_CAMERA_FPS) if self._process else int(GRID_CAMERA_FPS)
-        processing_fps = max(1, min(target_fps, int(PROCESSING_FPS)))
-        target_dt = 1.0 / processing_fps
-        out_w = FOCUS_CAMERA_WIDTH if self._process else GRID_CAMERA_WIDTH
-        out_h = FOCUS_CAMERA_HEIGHT if self._process else GRID_CAMERA_HEIGHT
+        base_fps = int(SERVER_CAMERA_FPS) if self._process else int(GRID_CAMERA_FPS)
+        focus_out_w = FOCUS_CAMERA_WIDTH if self._process else GRID_CAMERA_WIDTH
+        focus_out_h = FOCUS_CAMERA_HEIGHT if self._process else GRID_CAMERA_HEIGHT
 
         # Start the dedicated capture thread so RTSP reads are never blocked
         # by YOLO or face-detection inference.  This is the primary fix for
@@ -4644,6 +4898,18 @@ class SharedServerCamera:
 
         try:
             while not self._stop_evt.is_set():
+                display = _camera_should_display(self._camera_id)
+                grid_mode = display and _is_grid_view_mode()
+                if grid_mode:
+                    loop_fps = max(1, min(int(GRID_CAMERA_FPS), int(PROCESSING_FPS)))
+                elif display:
+                    loop_fps = max(1, min(base_fps, int(PROCESSING_FPS)))
+                else:
+                    loop_fps = ANALYTICS_HEADLESS_FPS
+                target_dt = 1.0 / loop_fps
+                out_w = GRID_CAMERA_WIDTH if grid_mode else focus_out_w
+                out_h = GRID_CAMERA_HEIGHT if grid_mode else focus_out_h
+
                 now_m = monotonic()
                 wait = next_send_t - now_m
                 if wait > 0:
@@ -4652,44 +4918,61 @@ class SharedServerCamera:
                 # to avoid a burst of back-to-back frames.
                 next_send_t = max(next_send_t + target_dt, monotonic())
 
-                # Read the freshest raw frame from the capture thread.
+                # Snapshot freshest RTSP frame (capture thread may overwrite while we infer).
                 frame = None
+                frame_age_ms = None
                 with self._raw_lock:
                     if self._raw_frame is not None:
-                        frame = self._raw_frame
-                        # Leave _raw_frame in place; capture thread overwrites
-                        # it with the next camera frame automatically.
+                        frame = self._raw_frame.copy()
+                        if self._raw_frame_ts:
+                            frame_age_ms = (time.time() - self._raw_frame_ts) * 1000.0
 
                 if frame is None:
-                    # Camera not ready yet — keep _latest unchanged.
-                    continue
+                    # Brief RTSP gap — keep grid tile alive with last good frame.
+                    if grid_mode and self._last_good_raw is not None:
+                        frame = self._last_good_raw.copy()
+                    else:
+                        continue
+
+                if frame is not None:
+                    try:
+                        self._last_good_raw = frame.copy()
+                    except Exception:
+                        pass
+
+                if frame_age_ms is not None and frame_age_ms > 800:
+                    logger.debug(
+                        f"CAM{self._camera_id} frame age {frame_age_ms:.0f}ms before inference"
+                    )
 
                 if self._process:
+                    if grid_mode:
+                        try:
+                            quick = _grid_overlay_only(frame, self._camera_id)
+                            self._publish_latest(quick, out_w, out_h)
+                        except Exception:
+                            pass
+                        _submit_grid_yolo(frame, self._camera_id)
+                        continue
+
                     try:
                         processed = process_frame(
                             frame,
                             yolo_input_resolution=FOCUS_YOLO_INPUT_RESOLUTION,
                             no_pre_resize=True,
                             camera_id=self._camera_id,
+                            display=display,
                         )
                     except Exception:
                         processed = frame
                 else:
                     processed = frame
 
-                try:
-                    # Use high-quality interpolation for sharp output.
-                    h_in, w_in = processed.shape[:2]
-                    if w_in > out_w or h_in > out_h:
-                        interp = cv2.INTER_AREA      # best for downscaling
-                    else:
-                        interp = cv2.INTER_LANCZOS4   # best for upscaling
-                    processed = cv2.resize(processed, (out_w, out_h), interpolation=interp)
-                except Exception:
-                    pass
+                if not display:
+                    # Headless analytics: detection/alerts only — skip preview buffer work.
+                    continue
 
-                with self._lock:
-                    self._latest = processed
+                self._publish_latest(processed, out_w, out_h)
         finally:
             _cap_stop.set()
             cap_thread.join(timeout=2.0)
@@ -4699,7 +4982,7 @@ class SharedServerCamera:
 
     def get_latest(self):
         with self._lock:
-            return self._latest
+            return self._latest.copy()
 
 
 _shared_cctv_lock = threading.Lock()
@@ -5321,6 +5604,65 @@ async def face_delete(request):
 
     send_alert("SYSTEM", f"Face '{name}' deleted (client={client_id})")
     return web.json_response({"status": "deleted", "name": name})
+
+
+# CCTV grid preview — JPEG snapshot from analytics pipeline (no extra WebRTC encoder)
+def _encode_grid_preview_jpeg(frame: np.ndarray) -> bytes | None:
+    if frame is None or frame.size == 0:
+        return None
+    h, w = frame.shape[:2]
+    out_w, out_h = GRID_CAMERA_WIDTH, GRID_CAMERA_HEIGHT
+    if w != out_w or h != out_h:
+        interp = cv2.INTER_AREA if w > out_w else cv2.INTER_LANCZOS4
+        frame = cv2.resize(frame, (out_w, out_h), interpolation=interp)
+    ok, buf = cv2.imencode(
+        ".jpg",
+        frame,
+        [int(cv2.IMWRITE_JPEG_QUALITY), int(GRID_PREVIEW_JPEG_QUALITY)],
+    )
+    if not ok:
+        return None
+    return buf.tobytes()
+
+
+async def camera_preview(request):
+    user = request.get("user") or {}
+    require_role(user, ["admin", "member"])
+    try:
+        camera_id = int(request.match_info.get("camera_id", 1))
+    except Exception:
+        return web.Response(status=400, text="invalid camera_id")
+
+    if _get_rtsp_url(camera_id) is None:
+        return web.Response(status=404, text="camera not configured")
+
+    try:
+        if AUTH_READY and user_can_access_camera:
+            access = await user_can_access_camera(user, camera_id)
+            if access is False:
+                try:
+                    from db import db_get_camera as _db_gc
+
+                    if await _db_gc(camera_id) is not None:
+                        return web.Response(status=403)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
+        cam = _get_shared_cctv_camera(camera_id, process=True)
+        jpeg = cam.get_preview_jpeg()
+        if not jpeg:
+            return web.Response(status=503, text="no frame yet")
+        return web.Response(
+            body=jpeg,
+            content_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as e:
+        logger.warning(f"camera_preview failed for cam {camera_id}: {e}")
+        return web.Response(status=500, text="preview failed")
 
 
 # FACE RECOGNIZE ENDPOINT (for Corporate Access page)
@@ -6198,11 +6540,14 @@ def main():
                         with stats_lock:
                             dr = stats_counters.get("detection_runs", 0)
                             of = stats_counters.get("outgoing_frames", 0)
+                            ysk = stats_counters.get("yolo_skip_busy", 0)
                             # reset counters
                             stats_counters["detection_runs"] = 0
                             stats_counters["outgoing_frames"] = 0
+                            stats_counters["yolo_skip_busy"] = 0
                         detections_per_sec = dr / INTERVAL
                         outgoing_fps = of / INTERVAL
+                        yolo_skip_per_sec = ysk / INTERVAL
                         perf_summary = ""
                         if PERF_STATS:
                             try:
@@ -6237,7 +6582,9 @@ def main():
                         hw_summary = f" | HW: cpu={hw['cpu_percent']}% ram={hw['ram_percent']}% gpu={hw['gpu_util']} gmem={hw['gpu_mem']}"
 
                         logger.info(
-                            f"📈 Stats (last {int(INTERVAL)}s) [YOLO: {CURRENT_YOLO_RUNTIME.upper()}]: detections/s={detections_per_sec:.2f}, outgoing_fps={outgoing_fps:.2f}{perf_summary}{hw_summary}"
+                            f"📈 Stats (last {int(INTERVAL)}s) [YOLO: {CURRENT_YOLO_RUNTIME.upper()}]: "
+                            f"detections/s={detections_per_sec:.2f}, yolo_skip/s={yolo_skip_per_sec:.1f}, "
+                            f"outgoing_fps={outgoing_fps:.2f}{perf_summary}{hw_summary}"
                         )
                     except Exception as e:
                         logger.warning(f"Stats reporter error: {e}")
@@ -6310,6 +6657,8 @@ def main():
     app.router.add_post("/api/face/delete", face_delete)
     app.router.add_get("/api/face/recognition-logs", recognition_logs_handler)
     app.router.add_get("/api/alerts/recent", recent_alerts_handler)
+    app.router.add_post("/api/view-mode", set_view_mode_handler)
+    app.router.add_get("/api/cameras/{camera_id}/preview.jpg", camera_preview)
     app.router.add_post("/api/face/recognize", face_recognize)
     # Member Management API (Admin only)
     app.router.add_get("/api/admin/members", list_members)
